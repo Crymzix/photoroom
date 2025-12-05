@@ -1,65 +1,93 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+import React, { useState, useRef } from 'react';
+import { Camera, MediaImageList, Compass } from 'iconoir-react';
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+import { StudioTab, StudioTabHandle } from '@/components/studio/studio-tab';
+import { TemplatesTab } from '@/components/studio/templates-tab';
+import { HistoryTab } from '@/components/studio/history-tab';
+import { Template, Tab } from '@/components/studio/types';
+import { mockTemplates } from '@/components/studio/data';
+
+// Main Component
+export default function ProductStudio() {
+    const [activeTab, setActiveTab] = useState('studio');
+    const [templates, setTemplates] = useState<Template[]>(mockTemplates);
+
+    // Ref to access StudioTab state/methods
+    const studioRef = useRef<StudioTabHandle>(null);
+
+    const handleAddTemplate = (t: Template) => {
+        setTemplates([...templates, t]);
+    };
+
+    const tabs: Tab[] = [
+        { id: 'studio', label: 'Studio', icon: Camera },
+        { id: 'templates', label: 'Templates', icon: MediaImageList },
+        { id: 'history', label: 'History', icon: Compass },
+    ];
+
+    return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-50 to-primary/15 relative">
+            <img
+                src="/background.webp"
+                className='-z-10 absolute h-full w-full bg-cover bg-no-repeat bg-fixed'>
+            </img>
+            <div className="-z-10 absolute h-full w-full bg-[radial-gradient(#d4d4d4_1px,transparent_1px)] [background-size:16px_16px] [mask-image:radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)]">
+            </div>
+
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col min-h-screen">
+                {/* Header */}
+                <header className="bg-card/90 backdrop-blur border-b sticky top-0 z-50">
+                    <div className="max-w-7xl mx-auto px-4 py-3">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-lg">
+                                    <img src='/logo.png' className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h1 className="text-lg font-bold text-gray-900">Virtual Studio</h1>
+                                    <p className="text-xs text-gray-500">Powered by FIBO / Bria AI</p>
+                                </div>
+                            </div>
+
+                            <TabsList>
+                                {tabs.map(t => (
+                                    <TabsTrigger key={t.id} value={t.id} className="flex items-center">
+                                        <t.icon className="w-4 h-4" />
+                                        {t.label}
+                                    </TabsTrigger>
+                                ))}
+                            </TabsList>
+
+                            <div className="flex items-center gap-2">
+                                {/* Global controls moved to StudioTab */}
+                            </div>
+                        </div>
+                    </div>
+                </header>
+
+                <main className="max-w-7xl mx-auto px-4 py-4 flex-1">
+                    <StudioTab
+                        ref={studioRef}
+                        templates={templates}
+                        onAddTemplate={handleAddTemplate}
+                    />
+
+                    <TemplatesTab
+                        templates={templates}
+                        applyTemplate={(t) => studioRef.current?.applyTemplate(t)}
+                        setActiveTab={setActiveTab}
+                    />
+
+                    <HistoryTab
+                        setSeed={(s) => studioRef.current?.setSeed(s)}
+                        setAspectRatio={(r) => studioRef.current?.setAspectRatio(r)}
+                        setActiveTab={setActiveTab}
+                    />
+                </main>
+            </Tabs>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
+    );
 }
