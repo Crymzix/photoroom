@@ -1,23 +1,30 @@
 import React, { useState, forwardRef, useImperativeHandle } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Upload, Sparks, Camera, SunLight, MediaImage, ControlSlider, Hashtag,
     Lock, LockSlash, Shuffle, RotateCameraRight, ReloadWindow, FloppyDisk,
-    ShieldAlert, CodeBracketsSquare, Copy, InfoCircle, Download, MediaImageList
+    ShieldAlert, CodeBracketsSquare, Copy, InfoCircle, Download, MediaImageList, Trash,
+    MediaImage, Sparks, Upload,
+    Settings
 } from 'iconoir-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+
 import { TabsContent } from "@/components/ui/tabs";
+import { Slider } from "@/components/ui/slider";
+import { Label } from "@/components/ui/label";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 import { Section } from './section';
-import { ButtonGroup } from './button-group';
 import { Template, StructuredPrompt } from './types';
-import { API_CONSTRAINTS } from './data';
+import { API_CONSTRAINTS, MOCK_GENERATED_SECTIONS } from './data';
+import { Loader2 } from 'lucide-react';
+import { useAction, useMutation } from 'convex/react';
+import { api } from '../../convex/_generated/api';
+import { uiSchema } from '../../app/api/studio-ui/schema';
+import { experimental_useObject as useObject } from '@ai-sdk/react';
+import { DynamicSection, StudioUiSkeleton, StudioUiEmptyState } from './dynamic-ui';
 
 export interface StudioTabHandle {
     applyTemplate: (t: Template) => void;
@@ -31,9 +38,25 @@ interface StudioTabProps {
 }
 
 export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ templates, onAddTemplate }, ref) => {
+    // Image upload
+    const generateUploadUrl = useMutation(api.images.generateUploadUrl);
+    const uploadImage = useMutation(api.images.uploadImage);
+    const [imageFile, setImageFile] = useState<File | null>(null);
+    const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'generating' | 'success' | 'error'>('idle');
+    const promptImage = useAction(api.promptImage.promptImage);
+    const [structuredPromptString, setStructuredPromptString] = useState<string | null>(null);
+    const { object, submit, isLoading: isStreamingUi } = useObject({
+        api: '/api/studio-ui',
+        schema: uiSchema,
+        onFinish: (event) => {
+            console.log('object', event);
+        }
+    });
+
     // State
     const [uploadedImage, setUploadedImage] = useState<string | null>(null);
     const [textPrompt, setTextPrompt] = useState('');
+    const [negativePrompt, setNegativePrompt] = useState('');
     const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const [generatedPreview, setGeneratedPreview] = useState<string | null>(null);
@@ -47,6 +70,8 @@ export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ template
     const [steps, setSteps] = useState(30);
     const [guidance, setGuidance] = useState(4);
     const [syncMode, setSyncMode] = useState(true);
+
+    const [isDragging, setIsDragging] = useState(false);
 
     // UI Controls
     const [cameraAngle, setCameraAngle] = useState('front');
@@ -77,35 +102,94 @@ export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ template
     };
 
     // Actions
+    const processFile = (file: File) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            if (typeof ev.target?.result === 'string') {
+                setUploadedImage(ev.target.result);
+                setGeneratedPreview(null);
+            }
+        };
+        reader.readAsDataURL(file);
+        setImageFile(file);
+    };
+
     const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-                if (typeof ev.target?.result === 'string') {
-                    setUploadedImage(ev.target.result);
-                    setGeneratedPreview(null);
-                }
-            };
-            reader.readAsDataURL(file);
+            processFile(file);
+        } else {
+            setImageFile(null);
         }
     };
 
-    const generate = () => {
-        if (!uploadedImage) return;
-        setIsGenerating(true);
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragging(true);
+    };
 
-        const newWarnings: string[] = [];
-        if (bgColor !== '#FFFFFF' && bgType === 'solid') {
-            newWarnings.push('Background not pure white - may not meet e-commerce requirements');
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragging(false);
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragging(false);
+        const file = e.dataTransfer.files?.[0];
+        if (file && file.type.startsWith('image/')) {
+            processFile(file);
         }
-        setWarnings(newWarnings);
+    };
 
-        setTimeout(() => {
-            setGeneratedPreview(uploadedImage);
+    const generate = async () => {
+        if (!uploadedImage) {
+            return;
+        }
+
+        try {
+            setIsGenerating(true);
+
+            setUploadState('uploading')
+            // Step 1: Get a short-lived upload URL
+            const postUrl = await generateUploadUrl();
+            // Step 2: POST the file to the URL
+            const result = await fetch(postUrl, {
+                method: "POST",
+                headers: { "Content-Type": imageFile!.type },
+                body: imageFile,
+            });
+            const { storageId } = await result.json();
+            // Step 3: Save the newly allocated storage id to the database
+            await uploadImage({ storageId });
+
+            // Step 4: Call Bria AI API
+            setUploadState('generating')
+            const response = await promptImage({
+                storageId,
+                prompt: textPrompt,
+                guidance,
+                seed,
+                steps
+            });
+
+            setGeneratedPreview(response.result.image_url);
+            setStructuredPromptString(response.result.structured_prompt);
+
+            submit({
+                structuredPrompt: response.result.structured_prompt,
+                seed,
+                guidance,
+                steps,
+            });
+
+            setUploadState('success');
+        } catch (e) {
+            setUploadState('error');
+            console.error(e);
+        } finally {
             setIsGenerating(false);
-            if (!seedLocked) setSeed(Math.floor(Math.random() * 999999));
-        }, 2000);
+        }
     };
 
     const applyTemplate = (t: Template) => {
@@ -153,245 +237,16 @@ export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ template
             >
                 <div className="grid grid-cols-12 gap-4">
                     {/* Left Panel */}
-                    <div className="col-span-3 space-y-0">
-                        {/* Upload */}
-                        <Section title="Reference Image" icon={Upload} badge="Required">
-                            <label className="block">
-                                <div className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-all ${uploadedImage ? 'border-primary/30 bg-primary/5' : 'hover:border-primary/40'
-                                    }`}>
-                                    <input type="file" accept="image/*" onChange={handleUpload} className="hidden" />
-                                    {uploadedImage ? (
-                                        <div>
-                                            <img src={uploadedImage} alt="Product" className="w-20 h-20 object-contain mx-auto rounded-lg mb-2" />
-                                            <p className="text-xs text-primary font-medium">Click to change</p>
-                                        </div>
-                                    ) : (
-                                        <div>
-                                            <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                                            <p className="text-sm text-gray-600">Drop image here</p>
-                                        </div>
-                                    )}
-                                </div>
-                            </label>
-                            <Textarea
-                                value={textPrompt}
-                                onChange={(e) => setTextPrompt(e.target.value)}
-                                placeholder="Additional prompt (optional)..."
-                                rows={2}
-                                className="w-full mt-3 px-3 py-2 text-sm resize-none"
-                            />
-                        </Section>
-
-                        {/* Templates */}
-                        <Section title="Quick Templates" icon={Sparks}>
-                            <div className="grid grid-cols-2 gap-2">
-                                {templates.slice(0, 4).map(t => (
-
-                                    <Button
-                                        key={t.id}
-                                        variant="outline"
-                                        onClick={() => applyTemplate(t)}
-                                        className={cn(
-                                            "h-auto py-2 px-3 justify-start flex-col items-start gap-1",
-                                            selectedTemplate?.id === t.id && "bg-primary/10 ring-2 ring-primary border-transparent"
-                                        )}
-                                    >
-                                        <span className="text-xl">{t.thumbnail}</span>
-                                        <p className="text-xs font-medium text-gray-900 truncate w-full text-left">{t.name}</p>
-                                    </Button>
-
-                                ))}
-                            </div>
-                        </Section>
-
-                        {/* Camera */}
-                        <Section title="Camera" icon={Camera}>
-                            <div className="space-y-3">
-                                <div>
-                                    <p className="text-xs text-gray-500 mb-2">Angle</p>
-                                    <ButtonGroup
-                                        options={[
-                                            { id: 'front', label: 'Front' },
-                                            { id: 'three-quarter', label: '3/4' },
-                                            { id: 'side', label: 'Side' },
-                                        ]}
-                                        value={cameraAngle}
-                                        onChange={setCameraAngle}
-                                    />
-                                </div>
-                                <div>
-                                    <p className="text-xs text-gray-500 mb-2">Height</p>
-                                    <ButtonGroup
-                                        options={[
-                                            { id: 'low', label: 'Low' },
-                                            { id: 'eye-level', label: 'Eye' },
-                                            { id: 'high', label: 'High' },
-                                        ]}
-                                        value={cameraHeight}
-                                        onChange={setCameraHeight}
-                                    />
-                                </div>
-                            </div>
-                        </Section>
-
-                        {/* Lighting */}
-                        <Section title="Lighting" icon={SunLight}>
-                            <div className="space-y-3">
-                                <div>
-                                    <p className="text-xs text-gray-500 mb-2">Type</p>
-                                    <ButtonGroup
-                                        options={[
-                                            { id: 'soft', label: '☁️ Soft' },
-                                            { id: 'dramatic', label: '🌙 Drama' },
-                                            { id: 'natural', label: '☀️ Natural' },
-                                            { id: 'bright', label: '💡 Bright' },
-                                        ]}
-                                        value={lightingType}
-                                        onChange={setLightingType}
-                                        columns={2}
-                                    />
-                                </div>
-                                <div>
-                                    <p className="text-xs text-gray-500 mb-2">Mood</p>
-                                    <Select
-                                        value={lightingMood}
-                                        onValueChange={setLightingMood}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Select mood" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="bright">Bright Commercial</SelectItem>
-                                            <SelectItem value="warm">Warm Inviting</SelectItem>
-                                            <SelectItem value="contrast">High Contrast</SelectItem>
-                                            <SelectItem value="soft">Soft Romantic</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
-                        </Section>
-
-                        {/* Background */}
-                        <Section title="Background" icon={MediaImage} defaultOpen={false}>
-                            <div className="space-y-3">
-                                <ButtonGroup
-                                    options={[
-                                        { id: 'solid', label: 'Solid' },
-                                        { id: 'gradient', label: 'Gradient' },
-                                        { id: 'scene', label: 'Scene' },
-                                    ]}
-                                    value={bgType}
-                                    onChange={setBgType}
-                                />
-                                {bgType !== 'scene' && (
-                                    <div className="flex gap-2">
-                                        {['#FFFFFF', '#F5F5F5', '#000000', '#FFFDD0'].map(c => (
-                                            <button
-                                                key={c}
-                                                onClick={() => setBgColor(c)}
-                                                className={cn(
-                                                    "w-8 h-8 rounded-lg transition-all border",
-                                                    bgColor === c && "ring-2 ring-primary ring-offset-2"
-                                                )}
-                                                style={{ backgroundColor: c, borderColor: c === '#FFFFFF' ? '#ddd' : 'transparent' }}
-                                            />
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        </Section>
-
-                        {/* Generation Settings */}
-                        <Section title="API Settings" icon={ControlSlider} badge="API">
-                            <div className="space-y-3">
-                                {/* Seed */}
-                                <div>
-                                    <div className="flex items-center justify-between mb-1">
-                                        <p className="text-xs text-gray-500 flex items-center gap-1">
-                                            <Hashtag className="w-3 h-3" /> Seed
-                                        </p>
-                                        <div className="flex gap-1">
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-6 w-6"
-                                                onClick={() => setSeedLocked(!seedLocked)}
-                                            >
-                                                {seedLocked ? <Lock className="w-3 h-3 text-amber-600" /> : <LockSlash className="w-3 h-3 text-gray-400" />}
-                                            </Button>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-6 w-6"
-                                                onClick={() => setSeed(Math.floor(Math.random() * 999999))}
-                                            >
-                                                <Shuffle className="w-3 h-3 text-gray-500" />
-                                            </Button>
-                                        </div>
-                                    </div>
-                                    <Input
-                                        type="number"
-                                        value={seed}
-                                        onChange={(e) => setSeed(parseInt(e.target.value) || 0)}
-                                        className="font-mono"
-                                    />
-                                </div>
-
-                                {/* Steps */}
-                                <div>
-                                    <div className="flex justify-between mb-1">
-                                        <p className="text-xs text-gray-500">Steps</p>
-                                        <span className="text-xs font-mono text-primary">{steps}</span>
-                                    </div>
-                                    <Slider
-                                        value={[steps]}
-                                        onValueChange={([v]) => setSteps(v)}
-                                        min={20}
-                                        max={50}
-                                        step={1}
-                                    />
-                                </div>
-
-                                {/* Guidance */}
-                                <div>
-                                    <div className="flex justify-between mb-1">
-                                        <p className="text-xs text-gray-500">Guidance</p>
-                                        <span className="text-xs font-mono text-primary">{guidance}</span>
-                                    </div>
-                                    <Slider
-                                        value={[guidance]}
-                                        onValueChange={([v]) => setGuidance(v)}
-                                        min={3}
-                                        max={5}
-                                        step={1}
-                                    />
-                                </div>
-
-                                {/* Sync Toggle */}
-                                <div className="flex items-center justify-between p-2 rounded-lg">
-                                    <div>
-                                        <p className="text-xs font-medium text-gray-700">Sync Mode</p>
-                                        <p className="text-xs text-gray-500">{syncMode ? 'Fast preview' : 'Async queue'}</p>
-                                    </div>
-                                    <Switch
-                                        checked={syncMode}
-                                        onCheckedChange={setSyncMode}
-                                    />
-                                </div>
-
-                                {/* View Code Toggle */}
-                                <div className="flex items-center justify-between p-2 rounded-lg">
-                                    <div>
-                                        <p className="text-xs font-medium text-gray-700">View Code</p>
-                                        <p className="text-xs text-gray-500">Show API payload</p>
-                                    </div>
-                                    <Switch
-                                        checked={showJson}
-                                        onCheckedChange={setShowJson}
-                                    />
-                                </div>
-                            </div>
-                        </Section>
+                    <div className="col-span-3 space-y-3">
+                        {isStreamingUi && (!object?.sections || object.sections.length === 0) ? (
+                            <StudioUiSkeleton />
+                        ) : object?.sections && object.sections.length > 0 ? (
+                            object.sections.map((section, index) => (
+                                <DynamicSection key={index} section={section} />
+                            ))
+                        ) : (
+                            <StudioUiEmptyState />
+                        )}
                     </div>
 
                     {/* Center - Preview */}
@@ -408,27 +263,56 @@ export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ template
                                             {selectedTemplate.name}
                                         </span>
                                     )}
+
                                 </div>
-                                <Button variant="ghost" size="icon" onClick={() => setSelectedTemplate(null)} className="h-8 w-8 text-gray-400 hover:text-gray-600">
-                                    <RotateCameraRight className="w-4 h-4" />
-                                </Button>
+                                <div className="flex gap-1">
+                                    {uploadedImage && (
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={() => {
+                                                setUploadedImage(null);
+                                                setGeneratedPreview(null);
+                                                setImageFile(null);
+                                            }}
+                                            className="h-8 w-8 text-gray-400 hover:text-red-500"
+                                            title="Remove image"
+                                        >
+                                            <Trash className="w-4 h-4" />
+                                        </Button>
+                                    )}
+                                    <Button variant="ghost" size="icon" onClick={() => setSelectedTemplate(null)} className="h-8 w-8 text-gray-400 hover:text-gray-600">
+                                        <RotateCameraRight className="w-4 h-4" />
+                                    </Button>
+                                </div>
                             </div>
 
                             <div
                                 className="aspect-square flex items-center justify-center transition-all overflow-hidden relative"
                             >
                                 {!uploadedImage ? (
-                                    <div className="text-center p-8">
+                                    <label
+                                        onDragOver={handleDragOver}
+                                        onDragLeave={handleDragLeave}
+                                        onDrop={handleDrop}
+                                        className={`cursor-pointer flex flex-col items-center justify-center w-full h-full p-8 transition-all relative
+                                            ${isDragging ? 'border-primary bg-primary/10' : 'border-gray-300 hover:bg-gray-50/50 hover:border-primary/40'}
+                                        `}
+                                    >
+                                        <div className='absolute inset-6 border-2 border-dashed border-primary/20 rounded-lg pointer-events-none transition-all'></div>
+                                        <input type="file" accept="image/*" onChange={handleUpload} className="hidden" />
                                         <div className="w-16 h-16 bg-amber-100 rounded-lg flex items-center justify-center mx-auto mb-3">
                                             <MediaImage className="w-8 h-8 text-amber-700" />
                                         </div>
                                         <p className="text-gray-800 font-medium">Upload a reference image</p>
-                                        <p className="text-gray-700 text-sm">to begin generating</p>
-                                    </div>
+                                        <p className="text-gray-700 text-sm">Drag and drop or click to upload</p>
+                                    </label>
                                 ) : isGenerating ? (
-                                    <div className="text-center">
-                                        <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin mx-auto mb-3" />
-                                        <p className="text-gray-600 font-medium">Generating...</p>
+                                    <div className="text-center p-8 max-w-full max-h-full">
+                                        <div className="w-16 h-16 border-4 border-primary/20 border-t-primary rounded-full animate-spin mx-auto mb-3" />
+                                        <p className="text-gray-600 font-medium">
+                                            {uploadState === 'generating' ? 'Generating...' : 'Processing...'}
+                                        </p>
                                     </div>
                                 ) : (
                                     <motion.img
@@ -443,85 +327,187 @@ export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ template
                                 )}
                             </div>
                             {/* Preview Footer */}
-                            <div className="p-3 border-t flex items-center justify-between bg-card z-20 relative">
-                                <div className="flex gap-2">
-                                    <Button
-                                        onClick={generate}
-                                        disabled={!uploadedImage || isGenerating}
-                                        className="bg-gradient-to-r from-primary to-blue-600 text-white"
-                                    >
-                                        {isGenerating ? <ReloadWindow className="w-4 h-4 animate-spin mr-2" /> : <Sparks className="w-4 h-4 mr-2" />}
-                                        Generate
-                                    </Button>
-                                    <Button variant="secondary" onClick={saveTemplate}>
-                                        <FloppyDisk className="w-4 h-4 mr-2" />
-                                        Save
-                                    </Button>
-                                </div>
-
-                                <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-                                    {API_CONSTRAINTS.aspectRatios.slice(0, 5).map(r => (
+                            <div className="p-3 border-t flex flex-col bg-card z-20 relative gap-3">
+                                <div className='flex items-center justify-between'>
+                                    <div className="flex gap-2">
                                         <Button
-                                            key={r}
-                                            variant={aspectRatio === r ? "secondary" : "ghost"}
-                                            size="sm"
-                                            onClick={() => setAspectRatio(r)}
-                                            className={cn("h-7 px-2 text-xs", aspectRatio === r && "bg-white text-primary shadow-sm")}
+                                            onClick={generate}
+                                            disabled={!uploadedImage || isGenerating}
+                                            className="bg-gradient-to-r from-[#FB4E43] via-[#FB4E43] to-[#39DEE3] text-white"
                                         >
-                                            {r}
+                                            {isGenerating || isStreamingUi ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Sparks className="w-4 h-4 mr-2" />}
+                                            {
+                                                uploadState === 'idle' ? 'Generate' :
+                                                    uploadState === 'uploading' ? 'Uploading...' :
+                                                        uploadState === 'generating' ? 'Generating...' :
+                                                            uploadState === 'success' ? 'Regenerate' :
+                                                                uploadState === 'error' ? 'Error' : 'Unknown'
+                                            }
                                         </Button>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
+                                    </div>
 
-                        {/* Warnings */}
-                        <AnimatePresence>
-                            {warnings.length > 0 && (
-                                <motion.div
-                                    initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                                    animate={{ opacity: 1, height: "auto", marginBottom: 12 }}
-                                    exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                                    className="overflow-hidden"
+                                    <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                                        {API_CONSTRAINTS.aspectRatios.map(r => (
+                                            <Button
+                                                key={r}
+                                                variant={aspectRatio === r ? "secondary" : "ghost"}
+                                                size="sm"
+                                                onClick={() => setAspectRatio(r)}
+                                                className={cn("h-7 px-2 text-xs", aspectRatio === r && "bg-white text-primary shadow-sm")}
+                                            >
+                                                {r}
+                                            </Button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Warnings */}
+                                <AnimatePresence>
+                                    {warnings.length > 0 && (
+                                        <motion.div
+                                            initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                                            animate={{ opacity: 1, height: "auto", marginBottom: 12 }}
+                                            exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                                            className="overflow-hidden"
+                                        >
+                                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                                <div className="flex items-start gap-2">
+                                                    <ShieldAlert className="w-4 h-4 text-amber-500 mt-0.5" />
+                                                    <div>
+                                                        <p className="font-medium text-amber-800 text-sm">Compliance Warning</p>
+                                                        {warnings.map((w, i) => (
+                                                            <p key={i} className="text-xs text-amber-700 mt-1">{w}</p>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+
+                                <div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-medium text-gray-900 text-sm">Prompt</span>
+                                        <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded-full">Required</span>
+                                    </div>
+                                    <Textarea
+                                        value={textPrompt}
+                                        onChange={(e) => setTextPrompt(e.target.value)}
+                                        placeholder="Text-based instruction. Used to refine your image."
+                                        rows={2}
+                                        className="w-full mt-1 px-3 py-2 text-sm resize-none bg-primary-foreground"
+                                        onKeyDown={(e => {
+                                            if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                generate();
+                                            }
+                                        })}
+                                    />
+                                </div>
+
+                                <div>
+                                    <span className="font-medium text-gray-900 text-sm">Negative Prompt</span>
+                                    <Textarea
+                                        value={negativePrompt}
+                                        onChange={(e) => setNegativePrompt(e.target.value)}
+                                        placeholder="Optional text prompt specifying concepts, styles, or objects to exclude from the generated image."
+                                        rows={2}
+                                        className="w-full mt-1 px-3 py-2 text-sm resize-none bg-primary-foreground"
+                                    />
+                                </div>
+                                {/* Advanced Settings */}
+                                <Section
+                                    title="Advanced Settings"
+                                    icon={Settings}
+                                    defaultOpen={false}
                                 >
-                                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                                        <div className="flex items-start gap-2">
-                                            <ShieldAlert className="w-4 h-4 text-amber-500 mt-0.5" />
-                                            <div>
-                                                <p className="font-medium text-amber-800 text-sm">Compliance Warning</p>
-                                                {warnings.map((w, i) => (
-                                                    <p key={i} className="text-xs text-amber-700 mt-1">{w}</p>
-                                                ))}
+                                    <div>
+                                        <div className="space-y-4">
+                                            {/* Guidance Scale */}
+                                            <div className="space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <Label className="text-sm font-medium">Guidance Scale</Label>
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <InfoCircle className="w-3.5 h-3.5 text-gray-400 cursor-help" />
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                <p>How closely the image follows the prompt. Lower values allow more creativity.</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </div>
+                                                    <span className="text-xs font-mono text-gray-500">{guidance}</span>
+                                                </div>
+                                                <Slider
+                                                    value={[guidance]}
+                                                    min={3}
+                                                    max={5}
+                                                    step={0.1}
+                                                    onValueChange={([val]) => setGuidance(val)}
+                                                />
+                                            </div>
+
+                                            {/* Steps */}
+                                            <div className="space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <Label className="text-sm font-medium">Steps</Label>
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <InfoCircle className="w-3.5 h-3.5 text-gray-400 cursor-help" />
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                <p>Number of denoising steps. More steps usually mean higher quality but take longer.</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </div>
+                                                    <span className="text-xs font-mono text-gray-500">{steps}</span>
+                                                </div>
+                                                <Slider
+                                                    value={[steps]}
+                                                    min={20}
+                                                    max={50}
+                                                    step={1}
+                                                    onValueChange={([val]) => setSteps(val)}
+                                                />
+                                            </div>
+
+                                            {/* Seed */}
+                                            <div className="space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <Label className="text-sm font-medium">Seed</Label>
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <InfoCircle className="w-3.5 h-3.5 text-gray-400 cursor-help" />
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                <p>Random seed for generation. Same seed + settings = same image.</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </div>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <Input
+                                                        type="number"
+                                                        value={seed}
+                                                        onChange={(e) => setSeed(Number(e.target.value))}
+                                                        className="font-mono text-sm"
+                                                    />
+                                                    <Button
+                                                        variant="outline"
+                                                        size="icon"
+                                                        onClick={() => setSeed(Math.floor(Math.random() * 1000000))}
+                                                        title="Randomize Seed"
+                                                    >
+                                                        <Shuffle className="w-4 h-4" />
+                                                    </Button>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-
-                        {/* Info Bar */}
-                        <div className="bg-card rounded-lg border p-3">
-                            <div className="grid grid-cols-5 gap-3 text-center">
-                                <div>
-                                    <p className="text-lg font-bold text-gray-900">{aspectRatio}</p>
-                                    <p className="text-xs text-gray-500">Ratio</p>
-                                </div>
-                                <div>
-                                    <p className="text-lg font-bold text-gray-900">{steps}</p>
-                                    <p className="text-xs text-gray-500">Steps</p>
-                                </div>
-                                <div>
-                                    <p className="text-lg font-bold font-mono text-gray-900">{seed}</p>
-                                    <p className="text-xs text-gray-500">Seed {seedLocked && '🔒'}</p>
-                                </div>
-                                <div>
-                                    <p className="text-lg font-bold text-gray-900">{guidance}</p>
-                                    <p className="text-xs text-gray-500">Guidance</p>
-                                </div>
-                                <div>
-                                    <p className="text-lg font-bold text-primary">{syncMode ? '~3s' : '~15s'}</p>
-                                    <p className="text-xs text-gray-500">Est. Time</p>
-                                </div>
+                                </Section>
                             </div>
                         </div>
                     </div>
@@ -599,56 +585,13 @@ export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ template
                                         </div>
                                         <Button
                                             disabled={!generatedPreview}
-                                            className="w-full bg-gradient-to-r from-primary to-blue-600 text-white"
+                                            className="w-full bg-gradient-to-r from-[#FB4E43] via-[#FB4E43] to-[#39DEE3] text-white"
                                         >
                                             Export Image
                                         </Button>
                                     </div>
                                 </div>
 
-                                {/* Variants */}
-                                <div className="bg-card rounded-lg overflow-hidden border">
-                                    <div className="p-3 border-b">
-                                        <p className="font-semibold text-gray-900 text-sm flex items-center gap-2">
-                                            <MediaImageList className="w-4 h-4 text-primary" />
-                                            Variants
-                                        </p>
-                                    </div>
-                                    <div className="p-3">
-                                        <p className="text-xs text-gray-600 mb-3">Generate variations with different seeds</p>
-                                        <div className="flex gap-2">
-                                            <Input type="number" defaultValue={4} min={1} max={10} className="w-16 h-9" />
-                                            <Button variant="secondary" className="flex-1">
-                                                <Shuffle className="w-3.5 h-3.5 mr-2" />
-                                                Generate
-                                            </Button>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Platforms */}
-                                <div className="bg-card rounded-lg overflow-hidden border">
-                                    <div className="p-3 border-b">
-                                        <p className="font-semibold text-gray-900 text-sm">Platform Presets</p>
-                                    </div>
-                                    <div className="p-3 grid grid-cols-2 gap-2">
-                                        {[
-                                            { name: 'Amazon', color: 'bg-orange-100 text-orange-600', ratio: '1:1' },
-                                            { name: 'Shopify', color: 'bg-green-100 text-green-600', ratio: '1:1' },
-                                            { name: 'Instagram', color: 'bg-pink-100 text-pink-600', ratio: '4:5' },
-                                            { name: 'Pinterest', color: 'bg-red-100 text-red-600', ratio: '2:3' },
-                                        ].map(p => (
-                                            <Button
-                                                key={p.name}
-                                                onClick={() => setAspectRatio(p.ratio)}
-                                                className={cn("h-auto py-2 px-3 justify-between", p.color)}
-                                            >
-                                                {p.name}
-                                                <span className="opacity-70">{p.ratio}</span>
-                                            </Button>
-                                        ))}
-                                    </div>
-                                </div>
                             </div>
                         )}
                     </div>

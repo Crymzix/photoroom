@@ -1,8 +1,8 @@
 import { Template } from './types';
 
-// API Constraints from Bria AI docs
+// API Constraints from Bria AI docs 
 export const API_CONSTRAINTS = {
-    aspectRatios: ['1:1', '2:3', '3:2', '4:3', '4:5', '9:16', '16:9'],
+    aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9'],
     stepsRange: { min: 20, max: 50, default: 30 },
     guidanceScale: { min: 3, max: 5, default: 4 },
 };
@@ -65,4 +65,78 @@ export const mockTemplates: Template[] = [
         seed: 512,
         steps: 30,
     },
+];
+
+export const MOCK_GENERATED_SECTIONS = [
+    {
+        title: "Composition & Camera",
+        inputs: [
+            {
+                id: "camera_angle",
+                label: "Camera Angle",
+                type: "select",
+                target_path: "camera.angle",
+                current_value: "Low Angle",
+                suggestions: ["Eye Level", "High Angle", "Bird's Eye", "Worm's Eye"]
+            },
+            {
+                id: "framing",
+                label: "Framing Style",
+                type: "text_short",
+                target_path: "camera.framing",
+                current_value: "Close-up",
+                suggestions: ["Wide Shot", "Medium Shot", "Macro"]
+            }
+        ]
+    },
+    {
+        title: "Lighting Conditions",
+        inputs: [
+            {
+                id: "lighting_mood",
+                label: "Lighting Atmosphere",
+                type: "text_long",
+                target_path: "lighting.mood",
+                current_value: "Soft, diffused natural light coming from the left side, creating gentle shadows.",
+                suggestions: ["Dramatic high contrast", "Neon cyberpunk style", "Warm golden hour"]
+            },
+            {
+                id: "intensity",
+                label: "Light Intensity",
+                type: "slider",
+                target_path: "lighting.intensity",
+                current_value: "75",
+                suggestions: ["30", "50", "90"]
+            }
+        ]
+    },
+    {
+        title: "Colors & Style",
+        inputs: [
+            {
+                id: "primary_color",
+                label: "Primary Accent Color",
+                type: "color",
+                target_path: "style.color",
+                current_value: "#ff4d4d",
+                suggestions: ["#336699", "#228b22", "#800080"]
+            },
+            {
+                id: "is_hdr",
+                label: "HDR Effect",
+                type: "toggle",
+                target_path: "style.hdr",
+                current_value: "true",
+                suggestions: ["false"]
+            },
+            {
+                id: "style_tags",
+                label: "Style Tags",
+                type: "text_short", // Using text_short to act as tags for now or could reuse tags type if fully implemented
+                target_path: "style.tags",
+                current_value: "Modern, Minimalist",
+                suggestions: ["Vintage", "Industrial", "Bohemian"]
+            }
+        ]
+    }
 ];

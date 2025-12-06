@@ -6,7 +6,7 @@ import { SectionProps } from './types';
 export function Section({ title, icon: Icon, children, defaultOpen = true, badge }: SectionProps) {
     const [isOpen, setIsOpen] = useState(defaultOpen);
     return (
-        <div className="border rounded-lg bg-card mb-3 overflow-hidden">
+        <div className="border rounded-lg bg-card overflow-hidden">
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className="w-full px-4 py-3 flex items-center justify-between transition-colors"

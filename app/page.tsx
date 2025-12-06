@@ -34,7 +34,7 @@ export default function ProductStudio() {
                 src="/background.webp"
                 className='-z-10 absolute h-full w-full bg-cover bg-no-repeat bg-fixed'>
             </img>
-            <div className="-z-10 absolute h-full w-full bg-[radial-gradient(#d4d4d4_1px,transparent_1px)] [background-size:16px_16px] [mask-image:radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)]">
+            <div className="-z-10 absolute h-full w-full bg-[radial-gradient(#7f1d1d_1px,transparent_1px)] [background-size:16px_16px] [mask-image:radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)]">
             </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col min-h-screen">
