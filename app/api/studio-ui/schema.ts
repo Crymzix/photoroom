@@ -32,3 +32,9 @@ const sectionSchema = z.object({
 export const uiSchema = z.object({
     sections: z.array(sectionSchema).describe("Array of UI sections containing inputs"),
 });
+
+// Export types
+export type UiSchema = z.infer<typeof uiSchema>;
+export type UiSection = z.infer<typeof sectionSchema>;
+export type UiInput = z.infer<typeof inputSchema>;
+export type UiInputType = z.infer<typeof inputTypeSchema>;

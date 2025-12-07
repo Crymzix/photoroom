@@ -13,9 +13,10 @@ export const uploadImage = mutation({
         storageId: v.id("_storage"),
     },
     handler: async (ctx, args) => {
-        await ctx.db.insert("images", {
+        const id = await ctx.db.insert("images", {
             body: args.storageId,
             format: "image",
         });
+        return id;
     },
 });

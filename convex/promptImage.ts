@@ -10,36 +10,56 @@ interface BriaImageResponse {
     }
 }
 
+export interface ImageRequest {
+    prompt: string;
+    negativePrompt: string;
+    imageUrl: string;
+    seed: number;
+    guidance: number;
+    steps: number;
+    structuredPrompt?: string;
+    aspectRatio: string;
+}
+
 export const promptImage = action({
     args: {
         storageId: v.id("_storage"),
         prompt: v.string(),
+        negativePrompt: v.string(),
         seed: v.number(),
         guidance: v.number(),
         steps: v.number(),
+        structuredPrompt: v.optional(v.string()),
+        aspectRatio: v.string(),
     },
     handler: async (ctx, args) => {
         const imageUrl = await ctx.storage.getUrl(args.storageId);
         if (!imageUrl) {
             throw new Error("Image not found");
         }
-        return await generateImage({ prompt: args.prompt, imageUrl, seed: args.seed, guidance: args.guidance, steps: args.steps });
+        return await generateImage({
+            prompt: args.prompt,
+            negativePrompt: args.negativePrompt,
+            imageUrl,
+            seed: args.seed,
+            guidance: args.guidance,
+            steps: args.steps,
+            structuredPrompt: args.structuredPrompt,
+            aspectRatio: args.aspectRatio
+        });
     },
 });
 
 async function generateImage({
     prompt,
+    negativePrompt,
     imageUrl,
     seed,
     guidance,
-    steps
-}: {
-    prompt: string;
-    imageUrl: string;
-    seed: number;
-    guidance: number;
-    steps: number;
-}) {
+    steps,
+    structuredPrompt,
+    aspectRatio
+}: ImageRequest) {
     const resp = await fetch(
         `https://engine.prod.bria-api.com/v2/image/generate`,
         {
@@ -50,11 +70,14 @@ async function generateImage({
             },
             body: JSON.stringify({
                 prompt,
+                negative_prompt: negativePrompt,
                 images: [imageUrl],
                 sync: true, // Make API call synchronous.
                 seed,
                 guidance_scale: guidance,
                 steps_num: steps,
+                structured_prompt: structuredPrompt,
+                aspect_ratio: aspectRatio
             })
         }
     );

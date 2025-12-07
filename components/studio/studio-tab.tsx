@@ -1,9 +1,15 @@
-import React, { useState, forwardRef, useImperativeHandle } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Lock, LockSlash, Shuffle, RotateCameraRight, ReloadWindow, FloppyDisk,
-    ShieldAlert, CodeBracketsSquare, Copy, InfoCircle, Download, MediaImageList, Trash,
-    MediaImage, Sparks, Upload,
+    Shuffle,
+    RotateCameraRight,
+    FloppyDisk,
+    ShieldAlert,
+    InfoCircle,
+    Download,
+    Trash,
+    MediaImage,
+    Sparks,
     Settings
 } from 'iconoir-react';
 import { Button } from "@/components/ui/button";
@@ -17,91 +23,64 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 
 import { Section } from './section';
-import { Template, StructuredPrompt } from './types';
-import { API_CONSTRAINTS, MOCK_GENERATED_SECTIONS } from './data';
+import { Template } from './types';
+import { API_CONSTRAINTS } from './data';
 import { Loader2 } from 'lucide-react';
 import { useAction, useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
-import { uiSchema } from '../../app/api/studio-ui/schema';
+import { UiSchema, uiSchema } from '../../app/api/studio-ui/schema';
 import { experimental_useObject as useObject } from '@ai-sdk/react';
 import { DynamicSection, StudioUiSkeleton, StudioUiEmptyState } from './dynamic-ui';
-
-export interface StudioTabHandle {
-    applyTemplate: (t: Template) => void;
-    setSeed: (val: number) => void;
-    setAspectRatio: (val: string) => void;
-}
+import { useQuery } from 'convex/react';
+import { Id } from '../../convex/_generated/dataModel';
+import set from 'lodash.set';
 
 interface StudioTabProps {
     templates: Template[];
     onAddTemplate: (t: Template) => void;
 }
 
-export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ templates, onAddTemplate }, ref) => {
+export const StudioTab = ({ templates, onAddTemplate }: StudioTabProps) => {
     // Image upload
     const generateUploadUrl = useMutation(api.images.generateUploadUrl);
     const uploadImage = useMutation(api.images.uploadImage);
     const [imageFile, setImageFile] = useState<File | null>(null);
-    const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'generating' | 'success' | 'error'>('idle');
+    const [studioState, setStudioState] = useState<'idle' | 'uploading' | 'generating' | 'generating-ui' | 'success' | 'error'>('idle');
     const promptImage = useAction(api.promptImage.promptImage);
-    const [structuredPromptString, setStructuredPromptString] = useState<string | null>(null);
+    const [structuredPrompt, setStructuredPrompt] = useState<string | undefined>();
+    const [ui, setUi] = useState<UiSchema | undefined>();
     const { object, submit, isLoading: isStreamingUi } = useObject({
         api: '/api/studio-ui',
         schema: uiSchema,
         onFinish: (event) => {
-            console.log('object', event);
+            onStudioUiFinish(event.object, event.error)
         }
     });
 
     // State
     const [uploadedImage, setUploadedImage] = useState<string | null>(null);
-    const [textPrompt, setTextPrompt] = useState('');
-    const [negativePrompt, setNegativePrompt] = useState('');
     const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const [generatedPreview, setGeneratedPreview] = useState<string | null>(null);
-    const [showJson, setShowJson] = useState(false);
-    const [aspectRatio, setAspectRatio] = useState('1:1');
     const [warnings, setWarnings] = useState<string[]>([]);
 
+    // Convex State
+    const [currentStudioId, setCurrentStudioId] = useState<Id<"studios"> | undefined>();
+    const saveStudioMutation = useMutation(api.studios.saveStudio);
+    const updateStudioMutation = useMutation(api.studios.updateStudio);
+    const saveGeneratedImageMutation = useMutation(api.studios.saveGeneratedImage);
+    const studioHistory = useQuery(api.studios.getStudioHistory, currentStudioId ? { studioId: currentStudioId } : "skip");
+
     // API Parameters
+    const [textPrompt, setTextPrompt] = useState('');
+    const [negativePrompt, setNegativePrompt] = useState('');
     const [seed, setSeed] = useState(42);
-    const [seedLocked, setSeedLocked] = useState(false);
     const [steps, setSteps] = useState(30);
     const [guidance, setGuidance] = useState(4);
-    const [syncMode, setSyncMode] = useState(true);
+    const [aspectRatio, setAspectRatio] = useState('1:1');
 
     const [isDragging, setIsDragging] = useState(false);
 
-    // UI Controls
-    const [cameraAngle, setCameraAngle] = useState('front');
-    const [cameraHeight, setCameraHeight] = useState('eye-level');
-    const [lightingType, setLightingType] = useState('soft');
-    const [lightingMood, setLightingMood] = useState('bright');
-    const [bgType, setBgType] = useState('solid');
-    const [bgColor, setBgColor] = useState('#FFFFFF');
-    const [productScale, setProductScale] = useState('large');
-    const [productPosition, setProductPosition] = useState('center');
-
-    // Derived State
-    const structuredPrompt: StructuredPrompt = {
-        subject: { position: productPosition, scale: productScale },
-        background: { type: bgType, color: bgColor === '#FFFFFF' ? 'pure white' : bgColor },
-        lighting: { type: lightingType, mood: lightingMood },
-        camera: { angle: cameraAngle, height: cameraHeight },
-    };
-
-    const apiPayload = {
-        structured_prompt: structuredPrompt,
-        prompt: textPrompt || undefined,
-        aspect_ratio: aspectRatio,
-        steps_num: steps,
-        seed: seed,
-        guidance_scale: guidance,
-        sync: syncMode,
-    };
-
-    // Actions
     const processFile = (file: File) => {
         const reader = new FileReader();
         reader.onload = (ev) => {
@@ -150,7 +129,7 @@ export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ template
         try {
             setIsGenerating(true);
 
-            setUploadState('uploading')
+            setStudioState('uploading')
             // Step 1: Get a short-lived upload URL
             const postUrl = await generateUploadUrl();
             // Step 2: POST the file to the URL
@@ -161,72 +140,149 @@ export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ template
             });
             const { storageId } = await result.json();
             // Step 3: Save the newly allocated storage id to the database
-            await uploadImage({ storageId });
+            const imageId = await uploadImage({ storageId });
 
             // Step 4: Call Bria AI API
-            setUploadState('generating')
+            setStudioState('generating')
             const response = await promptImage({
                 storageId,
                 prompt: textPrompt,
+                negativePrompt,
                 guidance,
                 seed,
-                steps
+                steps,
+                structuredPrompt,
+                aspectRatio
             });
 
             setGeneratedPreview(response.result.image_url);
-            setStructuredPromptString(response.result.structured_prompt);
 
-            submit({
-                structuredPrompt: response.result.structured_prompt,
-                seed,
-                guidance,
-                steps,
-            });
+            if (!structuredPrompt) {
+                setStructuredPrompt(response.result.structured_prompt);
+            }
 
-            setUploadState('success');
+            // Step 5: Save generated image
+            let studioId = currentStudioId;
+            if (!studioId) {
+                studioId = await handleSaveStudio(imageId)
+            }
+            if (studioId) {
+                await handleSaveGeneratedImage({
+                    studioId,
+                    generatedPreview: response.result.image_url,
+                    structuredPrompt: response.result.structured_prompt,
+                })
+            }
+
+            // Step 6: Generate UI
+            if (!ui) {
+                submit({
+                    structuredPrompt: response.result.structured_prompt,
+                    seed,
+                    guidance,
+                    steps,
+                });
+                setStudioState('generating-ui')
+            } else {
+                setStudioState('success')
+            }
         } catch (e) {
-            setUploadState('error');
+            setStudioState('error');
             console.error(e);
         } finally {
             setIsGenerating(false);
         }
     };
 
-    const applyTemplate = (t: Template) => {
-        setSelectedTemplate(t);
-        setSeed(t.seed);
-        setSteps(t.steps);
-        if (t.structuredPrompt.camera) {
-            setCameraAngle(t.structuredPrompt.camera.angle || 'front');
-            setCameraHeight(t.structuredPrompt.camera.height || 'eye-level');
+    const onStudioUiFinish = async (uiSchema?: UiSchema, error?: Error) => {
+        if (error || !uiSchema) {
+            console.error(error);
+            setStudioState('error');
+            return
         }
-        if (t.structuredPrompt.lighting) {
-            setLightingType(t.structuredPrompt.lighting.type || 'soft');
-            setLightingMood(t.structuredPrompt.lighting.mood || 'bright');
+
+        if (ui) {
+            return
         }
-        if (t.structuredPrompt.background) {
-            setBgType(t.structuredPrompt.background.type || 'solid');
+
+        await handleUpdateStudio(uiSchema);
+        setStudioState('success');
+        setUi(uiSchema)
+    }
+
+    const handleDynamicInputChange = (path: string, value: string) => {
+        if (!structuredPrompt) {
+            return
+        }
+        const structuredPromptObj = JSON.parse(structuredPrompt)
+        set(structuredPromptObj, path, value)
+        setStructuredPrompt(JSON.stringify(structuredPromptObj))
+    };
+
+    const handleSaveGeneratedImage = async ({
+        studioId,
+        generatedPreview,
+        structuredPrompt,
+    }: {
+        studioId: Id<'studios'>;
+        generatedPreview: string;
+        structuredPrompt: string;
+    }) => {
+        try {
+            if (!studioId || !generatedPreview || !structuredPrompt) {
+                return
+            }
+
+            const apiParameters = {
+                seed,
+                steps,
+                guidance,
+                aspectRatio,
+            }
+
+            await saveGeneratedImageMutation({
+                studioId,
+                imageUrl: generatedPreview,
+                prompt: textPrompt,
+                structuredPrompt,
+                settings: apiParameters
+            });
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    const handleSaveStudio = async (imageId: Id<"images">) => {
+        try {
+            const savedId = await saveStudioMutation({
+                name: `Studio ${new Date().toLocaleTimeString()}`,
+                imageId,
+                previewImageUrl: generatedPreview || undefined
+            });
+
+            if (savedId) {
+                setCurrentStudioId(savedId);
+            }
+
+            return savedId;
+        } catch (e) {
+            console.error(e);
         }
     };
 
-    const saveTemplate = () => {
-        const newT: Template = {
-            id: Date.now(),
-            name: `Custom ${templates.length + 1}`,
-            description: 'User created',
-            thumbnail: '💾',
-            structuredPrompt,
-            seed,
-            steps,
-        };
-        onAddTemplate(newT);
-    };
-
-    useImperativeHandle(ref, () => ({
-        applyTemplate,
-        setSeed,
-        setAspectRatio
-    }));
+    const handleUpdateStudio = async (ui?: UiSchema) => {
+        try {
+            if (!currentStudioId) {
+                return
+            }
+            await updateStudioMutation({
+                id: currentStudioId,
+                ui,
+            });
+        } catch (e) {
+            console.error(e);
+        }
+    }
 
     return (
         <TabsContent value="studio" className="mt-0">
@@ -241,8 +297,8 @@ export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ template
                         {isStreamingUi && (!object?.sections || object.sections.length === 0) ? (
                             <StudioUiSkeleton />
                         ) : object?.sections && object.sections.length > 0 ? (
-                            object.sections.map((section, index) => (
-                                <DynamicSection key={index} section={section} />
+                            object.sections.map((section: any, index: number) => (
+                                <DynamicSection key={index} section={section} onInputChange={handleDynamicInputChange} />
                             ))
                         ) : (
                             <StudioUiEmptyState />
@@ -311,7 +367,7 @@ export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ template
                                     <div className="text-center p-8 max-w-full max-h-full">
                                         <div className="w-16 h-16 border-4 border-primary/20 border-t-primary rounded-full animate-spin mx-auto mb-3" />
                                         <p className="text-gray-600 font-medium">
-                                            {uploadState === 'generating' ? 'Generating...' : 'Processing...'}
+                                            {studioState === 'generating' ? 'Generating...' : 'Processing...'}
                                         </p>
                                     </div>
                                 ) : (
@@ -332,16 +388,17 @@ export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ template
                                     <div className="flex gap-2">
                                         <Button
                                             onClick={generate}
-                                            disabled={!uploadedImage || isGenerating}
+                                            disabled={!uploadedImage || isGenerating || isStreamingUi}
                                             className="bg-gradient-to-r from-[#FB4E43] via-[#FB4E43] to-[#39DEE3] text-white"
                                         >
                                             {isGenerating || isStreamingUi ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Sparks className="w-4 h-4 mr-2" />}
                                             {
-                                                uploadState === 'idle' ? 'Generate' :
-                                                    uploadState === 'uploading' ? 'Uploading...' :
-                                                        uploadState === 'generating' ? 'Generating...' :
-                                                            uploadState === 'success' ? 'Regenerate' :
-                                                                uploadState === 'error' ? 'Error' : 'Unknown'
+                                                studioState === 'idle' ? 'Generate' :
+                                                    studioState === 'uploading' ? 'Uploading...' :
+                                                        studioState === 'generating' ? 'Generating...' :
+                                                            studioState === 'generating-ui' ? 'Generating UI...' :
+                                                                studioState === 'success' ? 'Regenerate' :
+                                                                    studioState === 'error' ? 'Error' : 'Unknown'
                                             }
                                         </Button>
                                     </div>
@@ -387,15 +444,40 @@ export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ template
 
                                 <div>
                                     <div className="flex items-center gap-2">
-                                        <span className="font-medium text-gray-900 text-sm">Prompt</span>
+                                        <Label className="text-sm font-medium">Prompt</Label>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <InfoCircle className="w-3.5 h-3.5 text-gray-400 cursor-help" />
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                                <p>Text-based instruction. Used to refine your image.</p>
+                                            </TooltipContent>
+                                        </Tooltip>
                                         <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded-full">Required</span>
                                     </div>
                                     <Textarea
                                         value={textPrompt}
                                         onChange={(e) => setTextPrompt(e.target.value)}
                                         placeholder="Text-based instruction. Used to refine your image."
+                                        typingPlaceholderWords={[
+                                            "Make the lighting more dramatic",
+                                            "Change the background to a sunset beach",
+                                            "Add a vintage film grain effect",
+                                            "Make the colors more vibrant",
+                                            "Turn this into a pencil sketch",
+                                            "Add a soft glow to the subject",
+                                            "Change the season to winter",
+                                            "Make it look like a 3d render",
+                                            "Add cinema lighting from the left",
+                                            "Change background to a white studio",
+                                            "Make the texture more metallic"
+                                        ]}
+                                        typingDuration={50}
+                                        typingDelay={500}
+                                        typingLoop={true}
                                         rows={2}
                                         className="w-full mt-1 px-3 py-2 text-sm resize-none bg-primary-foreground"
+                                        disabled={isGenerating || isStreamingUi}
                                         onKeyDown={(e => {
                                             if (e.key === 'Enter') {
                                                 e.preventDefault();
@@ -406,13 +488,37 @@ export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ template
                                 </div>
 
                                 <div>
-                                    <span className="font-medium text-gray-900 text-sm">Negative Prompt</span>
+                                    <div className="flex items-center gap-2">
+                                        <Label className="text-sm font-medium">Negative Prompt</Label>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <InfoCircle className="w-3.5 h-3.5 text-gray-400 cursor-help" />
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                                <p>Optional text prompt specifying concepts, styles, or objects to exclude from the generated image.</p>
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </div>
                                     <Textarea
                                         value={negativePrompt}
                                         onChange={(e) => setNegativePrompt(e.target.value)}
                                         placeholder="Optional text prompt specifying concepts, styles, or objects to exclude from the generated image."
+                                        typingPlaceholderWords={[
+                                            "Blurry, low quality, pixelated",
+                                            "Distorted face, extra fingers",
+                                            "Watermark, text, signature",
+                                            "Bad anatomy, ugly, deformed",
+                                            "Oversaturated, high contrast",
+                                            "Cartoon, illustration, painting",
+                                            "Mutated hands, poorley drawn hands",
+                                            "Disfigured, bad art, beginner"
+                                        ]}
+                                        typingDuration={50}
+                                        typingDelay={500}
+                                        typingLoop={true}
                                         rows={2}
                                         className="w-full mt-1 px-3 py-2 text-sm resize-none bg-primary-foreground"
+                                        disabled={isGenerating || isStreamingUi}
                                     />
                                 </div>
                                 {/* Advanced Settings */}
@@ -514,91 +620,67 @@ export const StudioTab = forwardRef<StudioTabHandle, StudioTabProps>(({ template
 
                     {/* Right Panel */}
                     <div className="col-span-3 space-y-3">
-                        {showJson ? (
-                            <div className="space-y-3">
-                                <div className="bg-gray-900 rounded-lg overflow-hidden">
-                                    <div className="p-3 border-b border-gray-500 flex items-center justify-between">
-                                        <span className="font-medium text-white text-sm flex items-center gap-2">
-                                            <CodeBracketsSquare className="w-4 h-4 text-primary" />
-                                            Structured Prompt
-                                        </span>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            onClick={() => navigator.clipboard.writeText(JSON.stringify(structuredPrompt, null, 2))}
-                                            className="h-6 w-6 text-gray-400 hover:text-white"
-                                        >
-                                            <Copy className="w-3.5 h-3.5" />
-                                        </Button>
-                                    </div>
-                                    <pre className="p-3 text-xs text-green-400 font-mono overflow-auto max-h-48">
-                                        {JSON.stringify(structuredPrompt, null, 2)}
-                                    </pre>
-                                </div>
-
-                                <div className="bg-gray-900 rounded-lg overflow-hidden">
-                                    <div className="p-3 border-b border-gray-500 flex items-center justify-between">
-                                        <span className="font-medium text-white text-sm">API Payload</span>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            onClick={() => navigator.clipboard.writeText(JSON.stringify(apiPayload, null, 2))}
-                                            className="h-6 w-6 text-gray-400 hover:text-white"
-                                        >
-                                            <Copy className="w-3.5 h-3.5" />
-                                        </Button>
-                                    </div>
-                                    <pre className="p-3 text-xs text-blue-400 font-mono overflow-auto max-h-48">
-                                        {JSON.stringify(apiPayload, null, 2)}
-                                    </pre>
-                                </div>
-
-                                <div className="bg-card rounded-lg border p-3">
-                                    <p className="font-medium text-gray-900 text-sm mb-2 flex items-center gap-2">
-                                        <InfoCircle className="w-4 h-4 text-primary" />
-                                        API Endpoints
+                        <div className="space-y-3">
+                            {/* Export */}
+                            <div className="bg-card rounded-lg overflow-hidden border">
+                                <div className="p-3 border-b">
+                                    <p className="font-semibold text-gray-900 text-sm flex items-center gap-2">
+                                        <Download className="w-4 h-4 text-primary" />
+                                        Export
                                     </p>
-                                    <div className="space-y-1 text-xs font-mono text-gray-600">
-                                        <p className="p-2 bg-gray-200 rounded">POST /structured_prompt/generate</p>
-                                        <p className="p-2 bg-gray-200 rounded">POST /image/generate</p>
-                                        <p className="p-2 bg-gray-200 rounded">GET /status/{'{request_id}'}</p>
+                                </div>
+                                <div className="p-3 space-y-3">
+                                    <div className="grid grid-cols-4 gap-2">
+                                        {['PNG', 'JPEG', 'WebP', 'TIFF'].map(f => (
+                                            <Button key={f} variant="outline" size="sm" className="text-xs h-8">
+                                                {f}
+                                            </Button>
+                                        ))}
                                     </div>
+                                    <Button
+                                        disabled={!generatedPreview}
+                                        className="w-full bg-gradient-to-r from-[#FB4E43] via-[#FB4E43] to-[#39DEE3] text-white"
+                                    >
+                                        Export Image
+                                    </Button>
                                 </div>
                             </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {/* Export */}
-                                <div className="bg-card rounded-lg overflow-hidden border">
+
+                            {currentStudioId && studioHistory && studioHistory?.length > 0 && (
+                                <div className="bg-card rounded-lg overflow-hidden border mt-3">
                                     <div className="p-3 border-b">
                                         <p className="font-semibold text-gray-900 text-sm flex items-center gap-2">
-                                            <Download className="w-4 h-4 text-primary" />
-                                            Export
+                                            History
                                         </p>
                                     </div>
-                                    <div className="p-3 space-y-3">
-                                        <div className="grid grid-cols-4 gap-2">
-                                            {['PNG', 'JPEG', 'WebP', 'TIFF'].map(f => (
-                                                <Button key={f} variant="outline" size="sm" className="text-xs h-8">
-                                                    {f}
-                                                </Button>
-                                            ))}
-                                        </div>
-                                        <Button
-                                            disabled={!generatedPreview}
-                                            className="w-full bg-gradient-to-r from-[#FB4E43] via-[#FB4E43] to-[#39DEE3] text-white"
-                                        >
-                                            Export Image
-                                        </Button>
+                                    <div className="p-3 grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
+                                        {studioHistory.map((img: any) => (
+                                            <div
+                                                key={img._id}
+                                                className="aspect-square bg-gray-100 rounded overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary"
+                                                onClick={() => {
+                                                    setGeneratedPreview(img.imageUrl);
+                                                }}
+                                            >
+                                                <img src={img.imageUrl} className="w-full h-full object-cover" />
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
+                            )}
+                        </div>
 
-                            </div>
-                        )}
+                        <div className="flex justify-end mt-2">
+                            <Button onClick={() => handleUpdateStudio()} variant="outline" size="sm" className="gap-2">
+                                <FloppyDisk className="w-4 h-4" />
+                                Save Studio
+                            </Button>
+                        </div>
                     </div>
                 </div>
             </motion.div>
         </TabsContent>
     );
-});
+}
 
 StudioTab.displayName = 'StudioTab';

@@ -52,6 +52,7 @@ interface DynamicInputProps {
         current_value: string;
         suggestions: string[];
     };
+    onInputChange: (path: string, value: string) => void;
 }
 
 const SuggestionAwareInput = ({
@@ -137,10 +138,16 @@ const SuggestionAwareInput = ({
     );
 };
 
-const DynamicInput = ({ input }: DynamicInputProps) => {
+const DynamicInput = ({ input, onInputChange }: DynamicInputProps) => {
     // Local state for the input value to allow editing
     // In a real app, this would bubble up changes
     const [value, setValue] = useState(input.current_value || '');
+
+    const handleValueChange = (newValue: string) => {
+        setValue(newValue);
+        // Debounce or direct call? For now direct call as StudioTab might debounce generation
+        onInputChange(input.target_path, newValue);
+    };
 
     useEffect(() => {
         if (input.current_value !== undefined && input.current_value !== value) {
@@ -149,13 +156,13 @@ const DynamicInput = ({ input }: DynamicInputProps) => {
     }, [input.current_value]);
 
     const handleSuggestionSelect = (suggestion: string) => {
-        setValue(suggestion);
+        handleValueChange(suggestion);
     };
 
     const renderInputControl = () => {
         const commonProps = {
             value,
-            onChange: (e: any) => setValue(e.target.value),
+            onChange: (e: any) => handleValueChange(e.target.value),
         };
 
         switch (input.type) {
@@ -170,7 +177,7 @@ const DynamicInput = ({ input }: DynamicInputProps) => {
                 );
             case 'select':
                 return (
-                    <Select value={value} onValueChange={setValue}>
+                    <Select value={value} onValueChange={handleValueChange}>
                         <SelectTrigger>
                             <SelectValue placeholder={input.label} />
                         </SelectTrigger>
@@ -186,7 +193,7 @@ const DynamicInput = ({ input }: DynamicInputProps) => {
                     <div className="flex items-center space-x-2">
                         <Switch
                             checked={value === 'true' || value === 'True'}
-                            onCheckedChange={(checked) => setValue(checked.toString())}
+                            onCheckedChange={(checked) => handleValueChange(checked.toString())}
                         />
                         <span className="text-sm text-gray-500">{value === 'true' ? 'On' : 'Off'}</span>
                     </div>
@@ -201,7 +208,7 @@ const DynamicInput = ({ input }: DynamicInputProps) => {
                             min={0}
                             max={100} // Range is ambiguous in schema, defaulting 0-100
                             step={1}
-                            onValueChange={(vals) => setValue(vals[0].toString())}
+                            onValueChange={(vals) => handleValueChange(vals[0].toString())}
                             className="flex-1"
                         />
                         <span className="w-12 text-xs text-right font-mono">{numVal}</span>
@@ -213,7 +220,7 @@ const DynamicInput = ({ input }: DynamicInputProps) => {
                         <input
                             type="color"
                             value={value}
-                            onChange={(e) => setValue(e.target.value)}
+                            onChange={(e) => handleValueChange(e.target.value)}
                             className="h-9 w-9 p-1 rounded-md cursor-pointer border-none"
                         />
                         <SuggestionAwareInput suggestions={input.suggestions} onSelect={handleSuggestionSelect} value={value}>
@@ -254,14 +261,14 @@ const DynamicInput = ({ input }: DynamicInputProps) => {
     );
 };
 
-export const DynamicSection = ({ section }: { section: any }) => {
+export const DynamicSection = ({ section, onInputChange }: { section: any, onInputChange: (path: string, value: string) => void }) => {
     const Icon = getSectionIcon(section.title);
 
     return (
         <Section title={section.title} icon={Icon}>
             <div className="space-y-1">
                 {section.inputs?.map((input: any, idx: number) => (
-                    <DynamicInput key={input.id || idx} input={input} />
+                    <DynamicInput key={input.id || idx} input={input} onInputChange={onInputChange} />
                 ))}
             </div>
         </Section>
@@ -269,38 +276,57 @@ export const DynamicSection = ({ section }: { section: any }) => {
 };
 
 export const StudioUiSkeleton = () => {
+    const [tick, setTick] = useState(0);
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setTick((t) => t + 1);
+        }, 800);
+        return () => clearInterval(timer);
+    }, []);
+
+    // Cycle: 0 -> 1 -> 2 -> 1 -> 0 ...
+    const cycle = tick % 4;
+    const activeIndex = cycle === 3 ? 1 : cycle;
+
     return (
         <div className="space-y-3">
-            {[1, 2, 3].map((i) => (
-                <motion.div
-                    key={i}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3, delay: i * 0.1 }}
-                    className="border rounded-lg bg-card overflow-hidden"
-                >
-                    <div className="px-4 py-3 flex items-center justify-between border-b border-dashed border-gray-100">
-                        <div className="flex items-center gap-2">
-                            <Skeleton className="h-7 w-7 rounded-lg" />
-                            <Skeleton className="h-4 w-32" />
-                        </div>
-                    </div>
-                    <div className="p-4 space-y-4">
-                        <div className="space-y-2">
-                            <Skeleton className="h-3 w-16" />
-                            <Skeleton className="h-9 w-full" />
-                            <div className="flex gap-2 mt-2">
-                                <Skeleton className="h-5 w-16 rounded-full" />
-                                <Skeleton className="h-5 w-20 rounded-full" />
+            {[0, 1, 2].map((i) => {
+                const isActive = i === activeIndex;
+                return (
+                    <motion.div
+                        key={i}
+                        animate={{
+                            opacity: isActive ? 1 : 0.4,
+                            scale: isActive ? 1 : 0.98,
+                            filter: isActive ? 'blur(0px)' : 'blur(1px)',
+                        }}
+                        transition={{ duration: 0.5 }}
+                        className="border rounded-lg bg-card overflow-hidden"
+                    >
+                        <div className="px-4 py-3 flex items-center justify-between border-b border-dashed border-gray-100">
+                            <div className="flex items-center gap-2">
+                                <Skeleton className="h-7 w-7 rounded-lg" />
+                                <Skeleton className="h-4 w-32" />
                             </div>
                         </div>
-                        <div className="space-y-2">
-                            <Skeleton className="h-3 w-20" />
-                            <Skeleton className="h-9 w-full" />
+                        <div className="p-4 space-y-4">
+                            <div className="space-y-2">
+                                <Skeleton className="h-3 w-16" />
+                                <Skeleton className="h-9 w-full" />
+                                <div className="flex gap-2 mt-2">
+                                    <Skeleton className="h-5 w-16 rounded-full" />
+                                    <Skeleton className="h-5 w-20 rounded-full" />
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <Skeleton className="h-3 w-20" />
+                                <Skeleton className="h-9 w-full" />
+                            </div>
                         </div>
-                    </div>
-                </motion.div>
-            ))}
+                    </motion.div>
+                )
+            })}
         </div>
     )
 }

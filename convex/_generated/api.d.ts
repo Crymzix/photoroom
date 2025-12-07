@@ -12,6 +12,7 @@ import type * as auth from "../auth.js";
 import type * as http from "../http.js";
 import type * as images from "../images.js";
 import type * as promptImage from "../promptImage.js";
+import type * as studios from "../studios.js";
 
 import type {
   ApiFromModules,
@@ -24,6 +25,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   images: typeof images;
   promptImage: typeof promptImage;
+  studios: typeof studios;
 }>;
 
 /**
