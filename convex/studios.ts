@@ -32,11 +32,14 @@ export const updateStudio = mutation({
         settings: v.optional(v.any()),
     },
     handler: async (ctx, args) => {
+        const userId = await getAuthUserId(ctx);
+
         const { id, ...data } = args;
         const timestamp = Date.now();
 
         await ctx.db.patch(id, {
             ...data,
+            userId,
             updatedAt: timestamp,
         });
     },

@@ -26,15 +26,22 @@ import { Section } from './section';
 import { Template } from './types';
 import { API_CONSTRAINTS } from './data';
 import { Loader2 } from 'lucide-react';
-import { useAction, useMutation } from 'convex/react';
+import { useAction } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { UiSchema, uiSchema } from '../../app/api/studio-ui/schema';
 import { experimental_useObject as useObject } from '@ai-sdk/react';
 import { DynamicSection, StudioUiSkeleton, StudioUiEmptyState } from './dynamic-ui';
 import { useQuery } from 'convex/react';
+import { useMutation } from "@tanstack/react-query";
+import { useConvexMutation } from "@convex-dev/react-query";
 import { Id } from '../../convex/_generated/dataModel';
 import set from 'lodash.set';
 import { getDiff } from 'json-difference'
+import { useAuthToken } from '@convex-dev/auth/react';
+import { useCompletion } from '@ai-sdk/react';
+import { generatePrompt } from '../../app/api/generate-prompt/generate-prompt';
+import { useDebouncedCallback, useDebounce } from 'use-debounce';
+import { SignInDialog } from '../sign-in-dialog';
 
 interface StudioTabProps {
     templates: Template[];
@@ -43,8 +50,12 @@ interface StudioTabProps {
 
 export const StudioTab = ({ templates, onAddTemplate }: StudioTabProps) => {
     // Image upload
-    const generateUploadUrl = useMutation(api.images.generateUploadUrl);
-    const uploadImage = useMutation(api.images.uploadImage);
+    const { mutateAsync: generateUploadUrl } = useMutation({
+        mutationFn: useConvexMutation(api.images.generateUploadUrl),
+    });
+    const { mutateAsync: uploadImage } = useMutation({
+        mutationFn: useConvexMutation(api.images.uploadImage),
+    });
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [studioState, setStudioState] = useState<'idle' | 'uploading' | 'generating' | 'generating-ui' | 'success' | 'error'>('idle');
     const promptImage = useAction(api.promptImage.promptImage);
@@ -66,13 +77,21 @@ export const StudioTab = ({ templates, onAddTemplate }: StudioTabProps) => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [generatedPreview, setGeneratedPreview] = useState<string | null>(null);
     const [warnings, setWarnings] = useState<string[]>([]);
+    const [signInOpen, setSignInOpen] = useState(false);
 
     // Convex State
     const [currentStudioId, setCurrentStudioId] = useState<Id<"studios"> | undefined>();
-    const saveStudioMutation = useMutation(api.studios.saveStudio);
-    const updateStudioMutation = useMutation(api.studios.updateStudio);
-    const saveGeneratedImageMutation = useMutation(api.studios.saveGeneratedImage);
+    const { mutateAsync: saveStudioMutation } = useMutation({
+        mutationFn: useConvexMutation(api.studios.saveStudio),
+    });
+    const { mutateAsync: saveGeneratedImageMutation } = useMutation({
+        mutationFn: useConvexMutation(api.studios.saveGeneratedImage),
+    });
+    const { mutateAsync: updateStudioMutation, isPending: isUpdatingStudio } = useMutation({
+        mutationFn: useConvexMutation(api.studios.updateStudio),
+    });
     const studioHistory = useQuery(api.studios.getStudioHistory, currentStudioId ? { studioId: currentStudioId } : "skip");
+    const token = useAuthToken();
 
     // API Parameters
     const [textPrompt, setTextPrompt] = useState('');
@@ -134,7 +153,7 @@ export const StudioTab = ({ templates, onAddTemplate }: StudioTabProps) => {
 
             setStudioState('uploading')
             // Step 1: Get a short-lived upload URL
-            const postUrl = await generateUploadUrl();
+            const postUrl = await generateUploadUrl(undefined);
             // Step 2: POST the file to the URL
             const result = await fetch(postUrl, {
                 method: "POST",
@@ -211,7 +230,7 @@ export const StudioTab = ({ templates, onAddTemplate }: StudioTabProps) => {
         setUi(uiSchema)
     }
 
-    const handleDynamicInputChange = (path: string, value: string) => {
+    const handleDiffCalculation = useDebouncedCallback((path: string, value: string) => {
         if (!structuredPrompt) {
             return
         }
@@ -220,8 +239,40 @@ export const StudioTab = ({ templates, onAddTemplate }: StudioTabProps) => {
 
         set(newStructuredPromptObj, path, value)
         const diff = getDiff(structuredPromptObj, newStructuredPromptObj)
-        setDiff(JSON.stringify(diff))
+        if (diff.edited.length > 0) {
+            setDiff(JSON.stringify(diff))
+        } else {
+            setDiff(undefined)
+        }
+    }, 300);
+
+    const handleDynamicInputChange = (path: string, value: string) => {
+        handleDiffCalculation(path, value);
     };
+
+    const { complete, completion, isLoading: isRefining } = useCompletion({
+        api: '/api/generate-prompt',
+        onFinish: (prompt, completion) => {
+            setTextPrompt(completion);
+        }
+    });
+
+    // Sync completion to text prompt while streaming
+    React.useEffect(() => {
+        if (completion) {
+            setTextPrompt(completion);
+        }
+    }, [completion]);
+
+    const [debouncedDiff] = useDebounce(diff, 500);
+
+    React.useEffect(() => {
+        if (debouncedDiff && structuredPrompt) {
+            const prompt = generatePrompt(structuredPrompt, debouncedDiff);
+            complete(prompt);
+        }
+    }, [debouncedDiff, structuredPrompt]);
+
 
     const handleSaveGeneratedImage = async ({
         studioId,
@@ -285,6 +336,16 @@ export const StudioTab = ({ templates, onAddTemplate }: StudioTabProps) => {
             });
         } catch (e) {
             console.error(e);
+        }
+    }
+
+    const handleSave = async () => {
+        if (token) {
+            // Allow save.
+            await handleUpdateStudio();
+        } else {
+            // Prompt sign in.
+            setSignInOpen(true);
         }
     }
 
@@ -401,8 +462,9 @@ export const StudioTab = ({ templates, onAddTemplate }: StudioTabProps) => {
                                                     studioState === 'uploading' ? 'Uploading...' :
                                                         studioState === 'generating' ? 'Generating...' :
                                                             studioState === 'generating-ui' ? 'Generating UI...' :
-                                                                studioState === 'success' ? 'Regenerate' :
-                                                                    studioState === 'error' ? 'Error' : 'Unknown'
+                                                                isRefining ? 'Refining Prompt...' :
+                                                                    studioState === 'success' ? 'Regenerate' :
+                                                                        studioState === 'error' ? 'Error' : 'Unknown'
                                             }
                                         </Button>
                                     </div>
@@ -673,16 +735,23 @@ export const StudioTab = ({ templates, onAddTemplate }: StudioTabProps) => {
                                 </div>
                             )}
                         </div>
-
-                        <div className="flex justify-end mt-2">
-                            <Button onClick={() => handleUpdateStudio()} variant="outline" className="gap-2">
-                                <FloppyDisk className="w-4 h-4" />
-                                Save Studio
-                            </Button>
-                        </div>
+                        {
+                            currentStudioId &&
+                            <div className="flex justify-end mt-2">
+                                <Button onClick={() => handleSave()} variant="outline" className="gap-2">
+                                    {
+                                        isUpdatingStudio &&
+                                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                    }
+                                    <FloppyDisk className="w-4 h-4" />
+                                    Save Studio
+                                </Button>
+                            </div>
+                        }
                     </div>
                 </div>
             </motion.div>
+            <SignInDialog open={signInOpen} onOpenChange={setSignInOpen} />
         </TabsContent>
     );
 }
