@@ -7,11 +7,10 @@ import { Template } from './types';
 
 interface TemplatesTabProps {
     templates: Template[];
-    applyTemplate: (t: Template) => void;
     setActiveTab: (tab: string) => void;
 }
 
-export function TemplatesTab({ templates, applyTemplate, setActiveTab }: TemplatesTabProps) {
+export function TemplatesTab({ templates, setActiveTab }: TemplatesTabProps) {
     return (
         <TabsContent value="templates" className="mt-0">
             <motion.div
@@ -48,7 +47,7 @@ export function TemplatesTab({ templates, applyTemplate, setActiveTab }: Templat
                                     </div>
                                     <div className="flex gap-2 mt-3">
                                         <Button
-                                            onClick={() => { applyTemplate(t); setActiveTab('studio'); }}
+                                            onClick={() => { setActiveTab('studio'); }}
                                             size="sm"
                                             className="flex-1 bg-primary text-white"
                                         >

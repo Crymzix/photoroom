@@ -34,6 +34,7 @@ import { DynamicSection, StudioUiSkeleton, StudioUiEmptyState } from './dynamic-
 import { useQuery } from 'convex/react';
 import { Id } from '../../convex/_generated/dataModel';
 import set from 'lodash.set';
+import { getDiff } from 'json-difference'
 
 interface StudioTabProps {
     templates: Template[];
@@ -48,7 +49,9 @@ export const StudioTab = ({ templates, onAddTemplate }: StudioTabProps) => {
     const [studioState, setStudioState] = useState<'idle' | 'uploading' | 'generating' | 'generating-ui' | 'success' | 'error'>('idle');
     const promptImage = useAction(api.promptImage.promptImage);
     const [structuredPrompt, setStructuredPrompt] = useState<string | undefined>();
+    const [diff, setDiff] = useState<string | undefined>();
     const [ui, setUi] = useState<UiSchema | undefined>();
+
     const { object, submit, isLoading: isStreamingUi } = useObject({
         api: '/api/studio-ui',
         schema: uiSchema,
@@ -156,16 +159,14 @@ export const StudioTab = ({ templates, onAddTemplate }: StudioTabProps) => {
             });
 
             setGeneratedPreview(response.result.image_url);
-
-            if (!structuredPrompt) {
-                setStructuredPrompt(response.result.structured_prompt);
-            }
+            setStructuredPrompt(response.result.structured_prompt);
 
             // Step 5: Save generated image
             let studioId = currentStudioId;
             if (!studioId) {
                 studioId = await handleSaveStudio(imageId)
             }
+
             if (studioId) {
                 await handleSaveGeneratedImage({
                     studioId,
@@ -215,8 +216,11 @@ export const StudioTab = ({ templates, onAddTemplate }: StudioTabProps) => {
             return
         }
         const structuredPromptObj = JSON.parse(structuredPrompt)
-        set(structuredPromptObj, path, value)
-        setStructuredPrompt(JSON.stringify(structuredPromptObj))
+        const newStructuredPromptObj = JSON.parse(structuredPrompt)
+
+        set(newStructuredPromptObj, path, value)
+        const diff = getDiff(structuredPromptObj, newStructuredPromptObj)
+        setDiff(JSON.stringify(diff))
     };
 
     const handleSaveGeneratedImage = async ({
@@ -671,7 +675,7 @@ export const StudioTab = ({ templates, onAddTemplate }: StudioTabProps) => {
                         </div>
 
                         <div className="flex justify-end mt-2">
-                            <Button onClick={() => handleUpdateStudio()} variant="outline" size="sm" className="gap-2">
+                            <Button onClick={() => handleUpdateStudio()} variant="outline" className="gap-2">
                                 <FloppyDisk className="w-4 h-4" />
                                 Save Studio
                             </Button>

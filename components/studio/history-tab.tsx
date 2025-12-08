@@ -5,12 +5,10 @@ import { Button } from "@/components/ui/button";
 import { TabsContent } from "@/components/ui/tabs";
 
 interface HistoryTabProps {
-    setSeed: (seed: number) => void;
-    setAspectRatio: (ratio: string) => void;
     setActiveTab: (tab: string) => void;
 }
 
-export function HistoryTab({ setSeed, setAspectRatio, setActiveTab }: HistoryTabProps) {
+export function HistoryTab({ setActiveTab }: HistoryTabProps) {
     return (
         <TabsContent value="history" className="mt-0">
             <motion.div
@@ -43,7 +41,7 @@ export function HistoryTab({ setSeed, setAspectRatio, setActiveTab }: HistoryTab
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <Button
-                                            onClick={() => { setSeed(item.seed); setAspectRatio(item.ratio); setActiveTab('studio'); }}
+                                            onClick={() => { setActiveTab('studio'); }}
                                             variant="secondary"
                                             size="sm"
                                             className="bg-primary/10 text-primary hover:bg-primary/20"
