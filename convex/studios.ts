@@ -28,7 +28,7 @@ export const updateStudio = mutation({
     args: {
         id: v.id("studios"),
         name: v.optional(v.string()),
-        ui: v.optional(v.any()),
+        ui: v.optional(v.string()),
         settings: v.optional(v.any()),
     },
     handler: async (ctx, args) => {
@@ -87,5 +87,91 @@ export const getStudioHistory = query({
             .withIndex("by_studio", (q) => q.eq("studioId", args.studioId!)) // Use non-null assertion since we checked above
             .order("desc") // timestamp is implied? No, need to sort.
             .collect();
+    },
+});
+
+export const getUserStudios = query({
+    args: {},
+    handler: async (ctx) => {
+        const userId = await getAuthUserId(ctx);
+        if (!userId) {
+            return [];
+        }
+
+        return await ctx.db
+            .query("studios")
+            .withIndex("by_user", (q) => q.eq("userId", userId))
+            .order("desc")
+            .collect();
+    },
+});
+
+export const deleteStudio = mutation({
+    args: {
+        id: v.id("studios"),
+    },
+    handler: async (ctx, args) => {
+        const userId = await getAuthUserId(ctx);
+        if (!userId) {
+            throw new Error("Not authenticated");
+        }
+
+        const studio = await ctx.db.get(args.id);
+        if (!studio) {
+            throw new Error("Studio not found");
+        }
+
+        // Check if the user owns this studio
+        if (studio.userId !== userId) {
+            throw new Error("Not authorized to delete this studio");
+        }
+
+        await ctx.db.delete(args.id);
+    },
+});
+
+export const getStudioById = query({
+    args: {
+        studioId: v.id("studios"),
+    },
+    handler: async (ctx, args) => {
+        const currentUserId = await getAuthUserId(ctx);
+        const studio = await ctx.db.get(args.studioId);
+
+        // Studio doesn't exist
+        if (!studio) {
+            return {
+                studio: null,
+                authStatus: "NOT_FOUND" as const,
+            };
+        }
+
+        // Studio has no userId assigned
+        if (!studio.userId) {
+            return {
+                studio: null,
+                authStatus: "NO_USER_ID" as const,
+            };
+        }
+
+        // Check if user owns the studio
+        const isOwner = currentUserId === studio.userId;
+
+        // Check if studio is public
+        const isPublic = studio.isPublic === true;
+
+        // User can view if they own it OR if it's public
+        if (isOwner || isPublic) {
+            return {
+                studio,
+                authStatus: "OK" as const,
+            };
+        }
+
+        // Studio is private and user is not the owner
+        return {
+            studio: null,
+            authStatus: "PRIVATE" as const,
+        };
     },
 });

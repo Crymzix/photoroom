@@ -16,6 +16,7 @@ export default defineSchema({
         ui: v.optional(v.string()),
         settings: v.optional(v.any()),
         previewImageUrl: v.optional(v.string()),
+        isPublic: v.optional(v.boolean()),
         updatedAt: v.number(),
     }).index("by_user", ["userId"]),
     generatedImages: defineTable({
