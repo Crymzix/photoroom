@@ -59,7 +59,15 @@ export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
     }, [isAuthenticated, open, onOpenChange]);
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog open={open} onOpenChange={(open) => {
+            if (!open) {
+                // Reset sync state
+                setIsSyncing(false);
+                setShowManual(false);
+                setIsSigningIn(false);
+            }
+            onOpenChange(open);
+        }}>
             <DialogContent>
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">

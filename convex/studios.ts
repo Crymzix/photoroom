@@ -28,7 +28,6 @@ export const updateStudio = mutation({
     args: {
         id: v.id("studios"),
         name: v.optional(v.string()),
-        ui: v.optional(v.string()),
         settings: v.optional(v.any()),
     },
     handler: async (ctx, args) => {
@@ -51,19 +50,37 @@ export const saveGeneratedImage = mutation({
         imageUrl: v.string(),
         prompt: v.string(),
         structuredPrompt: v.any(),
+        ui: v.optional(v.string()),
         settings: v.any(),
     },
     handler: async (ctx, args) => {
         const userId = await getAuthUserId(ctx);
 
-        await ctx.db.insert("generatedImages", {
+        const generatedImageId = await ctx.db.insert("generatedImages", {
             studioId: args.studioId,
             userId,
             imageUrl: args.imageUrl,
             prompt: args.prompt,
             structuredPrompt: args.structuredPrompt,
+            ui: args.ui,
             settings: args.settings,
             createdAt: Date.now(),
+        });
+
+        return generatedImageId;
+    },
+});
+
+export const updateGeneratedImage = mutation({
+    args: {
+        id: v.id("generatedImages"),
+        ui: v.optional(v.string()),
+    },
+    handler: async (ctx, args) => {
+        const { id, ...data } = args;
+
+        await ctx.db.patch(id, {
+            ...data,
         });
     },
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Shuffle,
@@ -44,6 +44,7 @@ import {
     StudioNoUserPlaceholder,
     StudioLoadingPlaceholder
 } from './studio-placeholders';
+import { GeneratedImage } from '../../lib/types';
 
 interface StudioTabProps {
     studioId?: string;
@@ -69,7 +70,7 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
     const [diff, setDiff] = useState<string | undefined>();
     const [ui, setUi] = useState<UiSchema | undefined>();
 
-    const { object, submit, isLoading: isStreamingUi } = useObject({
+    const { object: streamedUi, submit, isLoading: isStreamingUi } = useObject({
         api: '/api/studio-ui',
         schema: uiSchema,
         onFinish: (event) => {
@@ -77,9 +78,15 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
         }
     });
 
+    const { complete, completion, isLoading: isRefining } = useCompletion({
+        api: '/api/generate-prompt',
+        onFinish: (prompt, completion) => {
+            setTextPrompt(completion);
+        }
+    });
+
     // State
     const [uploadedImage, setUploadedImage] = useState<string | null>(null);
-    const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const [generatedPreview, setGeneratedPreview] = useState<string | null>(null);
     const [warnings, setWarnings] = useState<string[]>([]);
@@ -87,11 +94,15 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
 
     // Convex State
     const [currentStudioId, setCurrentStudioId] = useState<Id<"studios"> | undefined>();
+    const currentGeneratedImageId = useRef<Id<"generatedImages"> | undefined>(undefined);
     const { mutateAsync: saveStudioMutation, isSuccess: isStudioSaved } = useMutation({
         mutationFn: useConvexMutation(api.studios.saveStudio),
     });
     const { mutateAsync: saveGeneratedImageMutation } = useMutation({
         mutationFn: useConvexMutation(api.studios.saveGeneratedImage),
+    });
+    const { mutateAsync: updateGeneratedImageMutation } = useMutation({
+        mutationFn: useConvexMutation(api.studios.updateGeneratedImage),
     });
     const { mutateAsync: updateStudioMutation, isPending: isUpdatingStudio } = useMutation({
         mutationFn: useConvexMutation(api.studios.updateStudio),
@@ -112,27 +123,33 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
 
     const [isDragging, setIsDragging] = useState(false);
 
-    // Populate studio data when studioData is loaded
     useEffect(() => {
         if (studioData?.studio) {
             setCurrentStudioId(studioData.studio._id);
-
-            // Load the UI schema if available
-            if (studioData.studio.ui) {
-                try {
-                    const parsedUi = JSON.parse(studioData.studio.ui);
-                    setUi(parsedUi);
-                } catch (e) {
-                    console.error('Failed to parse UI schema:', e);
-                }
-            }
-
-            // Load structured prompt if available
-            if (studioData.studio.structuredPrompt) {
-                setStructuredPrompt(studioData.studio.structuredPrompt);
-            }
         }
     }, [studioData]);
+
+    useEffect(() => {
+        if (studioHistory && studioHistory.length > 0) {
+            const latestImage = studioHistory[0];
+            selectImage(latestImage);
+        }
+    }, [studioHistory]);
+
+    useEffect(() => {
+        if (completion) {
+            setTextPrompt(completion);
+        }
+    }, [completion]);
+
+    const [debouncedDiff] = useDebounce(diff, 500);
+
+    useEffect(() => {
+        if (debouncedDiff && structuredPrompt) {
+            const prompt = generatePrompt(structuredPrompt, debouncedDiff);
+            complete(prompt);
+        }
+    }, [debouncedDiff, structuredPrompt]);
 
     const processFile = (file: File) => {
         const reader = new FileReader();
@@ -175,7 +192,7 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
     };
 
     const generate = async () => {
-        if (!uploadedImage) {
+        if (!uploadedImage && !generatedPreview) {
             return;
         }
 
@@ -226,17 +243,13 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
             }
 
             // Step 6: Generate UI
-            if (!ui) {
-                submit({
-                    structuredPrompt: response.result.structured_prompt,
-                    seed,
-                    guidance,
-                    steps,
-                });
-                setStudioState('generating-ui')
-            } else {
-                setStudioState('success')
-            }
+            submit({
+                structuredPrompt: response.result.structured_prompt,
+                seed,
+                guidance,
+                steps,
+            });
+            setStudioState('generating-ui')
         } catch (e) {
             setStudioState('error');
             console.error(e);
@@ -247,16 +260,23 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
 
     const onStudioUiFinish = async (uiSchema?: UiSchema, error?: Error) => {
         if (error || !uiSchema) {
-            console.error(error);
+            console.error('UI generation error:', error);
             setStudioState('error');
             return
         }
 
-        if (ui) {
-            return
+        // Update the generated image with the UI
+        if (currentGeneratedImageId.current) {
+            try {
+                await updateGeneratedImageMutation({
+                    id: currentGeneratedImageId.current,
+                    ui: JSON.stringify(uiSchema),
+                });
+            } catch (e) {
+                console.error('Failed to save UI to generated image:', e);
+            }
         }
 
-        await handleUpdateStudio(uiSchema);
         setStudioState('success');
         setUi(uiSchema)
     }
@@ -281,28 +301,52 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
         handleDiffCalculation(path, value);
     };
 
-    const { complete, completion, isLoading: isRefining } = useCompletion({
-        api: '/api/generate-prompt',
-        onFinish: (prompt, completion) => {
-            setTextPrompt(completion);
-        }
-    });
+    const displaySections = useMemo(() => {
+        // If streaming and we have existing ui, merge them
+        if (isStreamingUi && ui?.sections && ui.sections.length > 0) {
+            if (!streamedUi?.sections || streamedUi.sections.length === 0) {
+                // Streaming just started, show existing UI
+                return ui.sections;
+            }
 
-    // Sync completion to text prompt while streaming
-    useEffect(() => {
-        if (completion) {
-            setTextPrompt(completion);
-        }
-    }, [completion]);
+            // Create a map of streamed sections by title for easy lookup
+            const streamedMap = new Map(
+                streamedUi.sections.map((section: any) => [section.title, section])
+            );
 
-    const [debouncedDiff] = useDebounce(diff, 500);
+            // Start with existing sections
+            const merged = [...ui.sections];
 
-    useEffect(() => {
-        if (debouncedDiff && structuredPrompt) {
-            const prompt = generatePrompt(structuredPrompt, debouncedDiff);
-            complete(prompt);
+            // Update/replace sections that exist in streamedUi
+            for (let i = 0; i < merged.length; i++) {
+                const existingSection = merged[i];
+                if (streamedMap.has(existingSection.title)) {
+                    merged[i] = streamedMap.get(existingSection.title);
+                    streamedMap.delete(existingSection.title);
+                }
+            }
+
+            // Add any new sections from streamedUi that weren't in ui
+            streamedMap.forEach((section) => {
+                merged.push(section);
+            });
+
+            return merged;
         }
-    }, [debouncedDiff, structuredPrompt]);
+
+        // If streaming without existing ui, show streamedUi
+        if (isStreamingUi && streamedUi?.sections && streamedUi.sections.length > 0) {
+            return streamedUi.sections;
+        }
+
+        // Not streaming, show stable ui state
+        if (ui?.sections && ui.sections.length > 0) {
+            return ui.sections;
+        }
+
+        // No sections available
+        return null;
+    }, [isStreamingUi, ui, streamedUi]);
 
     const handleSaveGeneratedImage = async ({
         studioId,
@@ -325,13 +369,17 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                 aspectRatio,
             }
 
-            await saveGeneratedImageMutation({
+            const generatedImageId = await saveGeneratedImageMutation({
                 studioId,
                 imageUrl: generatedPreview,
                 prompt: textPrompt,
                 structuredPrompt,
+                ui: undefined, // UI will be added when it finishes generating
                 settings: apiParameters
             });
+
+            // Store the ID so we can update it with UI later
+            currentGeneratedImageId.current = generatedImageId;
         } catch (e) {
             console.error(e);
         }
@@ -355,14 +403,14 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
         }
     };
 
-    const handleUpdateStudio = async (ui?: UiSchema) => {
+    const handleUpdateStudio = async (name?: string) => {
         try {
             if (!currentStudioId) {
                 return
             }
             await updateStudioMutation({
                 id: currentStudioId,
-                ui: JSON.stringify(ui),
+                name,
             });
         } catch (e) {
             console.error(e);
@@ -376,6 +424,18 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
         } else {
             // Prompt sign in.
             setSignInOpen(true);
+        }
+    }
+
+    const selectImage = (img: GeneratedImage) => {
+        if (isGenerating || isStreamingUi) {
+            return;
+        }
+        setTextPrompt(img.prompt);
+        setStructuredPrompt(img.structuredPrompt);
+        setGeneratedPreview(img.imageUrl);
+        if (img.ui) {
+            setUi(JSON.parse(img.ui));
         }
     }
 
@@ -406,12 +466,32 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                     <div className="grid grid-cols-12 gap-4">
                         {/* Left Panel */}
                         <div className="col-span-3 space-y-3">
-                            {isStreamingUi && (!object?.sections || object.sections.length === 0) ? (
+                            {isStreamingUi && !displaySections ? (
+                                // Only show skeleton when streaming with no sections at all (first generation)
                                 <StudioUiSkeleton />
-                            ) : object?.sections && object.sections.length > 0 ? (
-                                object.sections.map((section: any, index: number) => (
-                                    <DynamicSection key={index} section={section} onInputChange={handleDynamicInputChange} />
-                                ))
+                            ) : displaySections && displaySections.length > 0 ? (
+                                // Show sections with animations
+                                <AnimatePresence mode="popLayout">
+                                    {displaySections.map((section: any, index: number) => (
+                                        <motion.div
+                                            key={section.title || index}
+                                            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+                                            transition={{
+                                                duration: 0.3,
+                                                ease: "easeOut"
+                                            }}
+                                            layout
+                                        >
+                                            <DynamicSection
+                                                disabled={false}
+                                                section={section}
+                                                onInputChange={handleDynamicInputChange}
+                                            />
+                                        </motion.div>
+                                    ))}
+                                </AnimatePresence>
                             ) : (
                                 <StudioUiEmptyState />
                             )}
@@ -450,7 +530,7 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                                 <div
                                     className="aspect-square flex items-center justify-center transition-all overflow-hidden relative"
                                 >
-                                    {!uploadedImage ? (
+                                    {!uploadedImage && !generatedPreview ? (
                                         <label
                                             onDragOver={handleDragOver}
                                             onDragLeave={handleDragLeave}
@@ -480,7 +560,7 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                                             initial={{ opacity: 0, scale: 0.95 }}
                                             animate={{ opacity: 1, scale: 1 }}
                                             transition={{ duration: 0.3 }}
-                                            src={generatedPreview || uploadedImage}
+                                            src={generatedPreview || uploadedImage || undefined}
                                             alt="Preview"
                                             className="max-w-full max-h-full object-contain"
                                         />
@@ -492,7 +572,7 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                                         <div className="flex gap-2">
                                             <Button
                                                 onClick={generate}
-                                                disabled={!uploadedImage || isGenerating || isStreamingUi || !textPrompt?.trim()}
+                                                disabled={(!uploadedImage && !generatedPreview) || isGenerating || isStreamingUi || !textPrompt?.trim()}
                                                 className="bg-gradient-to-r from-[#FB4E43] via-[#FB4E43] to-[#39DEE3] text-white"
                                             >
                                                 {isGenerating || isStreamingUi ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Sparks className="w-4 h-4 mr-2" />}
@@ -582,7 +662,7 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                                             typingLoop={true}
                                             rows={2}
                                             className="w-full mt-1 px-3 py-2 text-sm resize-none bg-primary-foreground"
-                                            disabled={isGenerating || isStreamingUi}
+                                            disabled={isGenerating || isStreamingUi || isRefining}
                                             onKeyDown={(e => {
                                                 if (e.key === 'Enter') {
                                                     e.preventDefault();
@@ -759,12 +839,12 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                                             </p>
                                         </div>
                                         <div className="p-3 grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
-                                            {studioHistory.map((img: any) => (
+                                            {studioHistory.map((img) => (
                                                 <div
                                                     key={img._id}
-                                                    className="aspect-square bg-gray-100 rounded overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary"
+                                                    className={`aspect-square bg-gray-100 rounded overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary ${isGenerating || isStreamingUi ? 'opacity-50' : ''}`}
                                                     onClick={() => {
-                                                        setGeneratedPreview(img.imageUrl);
+                                                        selectImage(img)
                                                     }}
                                                 >
                                                     <img src={img.imageUrl} className="w-full h-full object-cover" />

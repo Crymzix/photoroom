@@ -12,7 +12,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
     Popover,
     PopoverContent,
@@ -53,6 +53,7 @@ interface DynamicInputProps {
         suggestions: string[];
     };
     onInputChange: (path: string, value: string) => void;
+    disabled?: boolean;
 }
 
 const SuggestionAwareInput = ({
@@ -138,7 +139,7 @@ const SuggestionAwareInput = ({
     );
 };
 
-const DynamicInput = ({ input, onInputChange }: DynamicInputProps) => {
+const DynamicInput = ({ input, onInputChange, disabled }: DynamicInputProps) => {
     // Local state for the input value to allow editing
     // In a real app, this would bubble up changes
     const [value, setValue] = useState(input.current_value || '');
@@ -172,12 +173,13 @@ const DynamicInput = ({ input, onInputChange }: DynamicInputProps) => {
                         <Textarea
                             {...commonProps}
                             className="resize-none"
+                            disabled={disabled}
                         />
                     </SuggestionAwareInput>
                 );
             case 'select':
                 return (
-                    <Select value={value} onValueChange={handleValueChange}>
+                    <Select value={value} onValueChange={handleValueChange} disabled={disabled}>
                         <SelectTrigger>
                             <SelectValue placeholder={input.label} />
                         </SelectTrigger>
@@ -194,6 +196,7 @@ const DynamicInput = ({ input, onInputChange }: DynamicInputProps) => {
                         <Switch
                             checked={value === 'true' || value === 'True'}
                             onCheckedChange={(checked) => handleValueChange(checked.toString())}
+                            disabled={disabled}
                         />
                         <span className="text-sm text-gray-500">{value === 'true' ? 'On' : 'Off'}</span>
                     </div>
@@ -210,6 +213,7 @@ const DynamicInput = ({ input, onInputChange }: DynamicInputProps) => {
                             step={1}
                             onValueChange={(vals) => handleValueChange(vals[0].toString())}
                             className="flex-1"
+                            disabled={disabled}
                         />
                         <span className="w-12 text-xs text-right font-mono">{numVal}</span>
                     </div>
@@ -222,11 +226,13 @@ const DynamicInput = ({ input, onInputChange }: DynamicInputProps) => {
                             value={value}
                             onChange={(e) => handleValueChange(e.target.value)}
                             className="h-9 w-9 p-1 rounded-md cursor-pointer border-none"
+                            disabled={disabled}
                         />
                         <SuggestionAwareInput suggestions={input.suggestions} onSelect={handleSuggestionSelect} value={value}>
                             <Input
                                 {...commonProps}
                                 className="font-mono"
+                                disabled={disabled}
                             />
                         </SuggestionAwareInput>
                     </div>
@@ -237,6 +243,7 @@ const DynamicInput = ({ input, onInputChange }: DynamicInputProps) => {
                         <Input
                             type="number"
                             {...commonProps}
+                            disabled={disabled}
                         />
                     </SuggestionAwareInput>
                 );
@@ -247,6 +254,7 @@ const DynamicInput = ({ input, onInputChange }: DynamicInputProps) => {
                     <SuggestionAwareInput suggestions={input.suggestions} onSelect={handleSuggestionSelect} value={value}>
                         <Input
                             {...commonProps}
+                            disabled={disabled}
                         />
                     </SuggestionAwareInput>
                 );
@@ -261,15 +269,26 @@ const DynamicInput = ({ input, onInputChange }: DynamicInputProps) => {
     );
 };
 
-export const DynamicSection = ({ section, onInputChange }: { section: any, onInputChange: (path: string, value: string) => void }) => {
+export const DynamicSection = ({ section, onInputChange, disabled }: { section: any, onInputChange: (path: string, value: string) => void, disabled?: boolean }) => {
     const Icon = getSectionIcon(section.title);
 
     return (
         <Section title={section.title} icon={Icon}>
             <div className="space-y-1">
-                {section.inputs?.map((input: any, idx: number) => (
-                    <DynamicInput key={input.id || idx} input={input} onInputChange={onInputChange} />
-                ))}
+                <AnimatePresence mode="popLayout">
+                    {section.inputs?.map((input: any, idx: number) => (
+                        <motion.div
+                            key={input.id || `${input.label}-${idx}`}
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.2 }}
+                            layout
+                        >
+                            <DynamicInput input={input} onInputChange={onInputChange} disabled={disabled} />
+                        </motion.div>
+                    ))}
+                </AnimatePresence>
             </div>
         </Section>
     );

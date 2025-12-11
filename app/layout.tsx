@@ -28,6 +28,8 @@ export default function RootLayout({
 
     return (
         <html lang="en">
+            <title>Photo Studio</title>
+            <meta name="description" content="Generate images a different way." />
             <body
                 className={`${poppins.variable} ${ibmPlexMono.variable} antialiased`}
             >

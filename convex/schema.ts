@@ -12,8 +12,6 @@ export default defineSchema({
         userId: v.union(v.id("users"), v.null()),
         imageId: v.id("images"),
         name: v.optional(v.string()),
-        structuredPrompt: v.optional(v.string()),
-        ui: v.optional(v.string()),
         settings: v.optional(v.any()),
         previewImageUrl: v.optional(v.string()),
         isPublic: v.optional(v.boolean()),
@@ -25,6 +23,7 @@ export default defineSchema({
         imageUrl: v.string(),
         prompt: v.string(),
         structuredPrompt: v.string(),
+        ui: v.optional(v.string()),
         settings: v.any(),
         createdAt: v.number(),
     })

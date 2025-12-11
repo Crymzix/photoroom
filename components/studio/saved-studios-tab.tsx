@@ -93,8 +93,6 @@ export function SavedStudios() {
                         Create an account to save your generated studios and access them from any device.
                     </p>
                 </div>
-                {/* Assuming there is a global sign in button in the header, we just prompt here. 
-                    If I knew the trigger, I'd add a button. */}
             </motion.div>
         );
     }
