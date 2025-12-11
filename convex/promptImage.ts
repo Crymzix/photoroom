@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { action } from "./_generated/server";
 
-interface BriaImageResponse {
+export interface BriaImageResponse {
     request_id: string;
     result: {
         image_url: string;
@@ -23,7 +23,8 @@ export interface ImageRequest {
 
 export const promptImage = action({
     args: {
-        storageId: v.id("_storage"),
+        storageId: v.optional(v.id("_storage")),
+        imageUrl: v.optional(v.string()),
         prompt: v.string(),
         negativePrompt: v.string(),
         seed: v.number(),
@@ -33,7 +34,10 @@ export const promptImage = action({
         aspectRatio: v.string(),
     },
     handler: async (ctx, args) => {
-        const imageUrl = await ctx.storage.getUrl(args.storageId);
+        if (!args.imageUrl && !args.storageId) {
+            throw new Error("Image not found");
+        }
+        const imageUrl = args.imageUrl || await ctx.storage.getUrl(args.storageId!);
         if (!imageUrl) {
             throw new Error("Image not found");
         }

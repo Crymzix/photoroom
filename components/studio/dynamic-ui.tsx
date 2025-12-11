@@ -262,7 +262,7 @@ const DynamicInput = ({ input, onInputChange, disabled }: DynamicInputProps) => 
     };
 
     return (
-        <div className="mb-4 last:mb-0">
+        <div className="w-full">
             <Label className="text-xs font-medium text-gray-500 mb-1.5 block">{input.label}</Label>
             {renderInputControl()}
         </div>
@@ -274,18 +274,23 @@ export const DynamicSection = ({ section, onInputChange, disabled }: { section: 
 
     return (
         <Section title={section.title} icon={Icon}>
-            <div className="space-y-1">
-                <AnimatePresence mode="popLayout">
+            <div className="flex flex-col gap-2">
+                <AnimatePresence initial={false}>
                     {section.inputs?.map((input: any, idx: number) => (
                         <motion.div
                             key={input.id || `${input.label}-${idx}`}
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: "auto" }}
                             exit={{ opacity: 0, height: 0 }}
-                            transition={{ duration: 0.2 }}
-                            layout
+                            transition={{
+                                duration: 0.3,
+                                ease: [0.4, 0, 0.2, 1], // Smooth "iOS-like" ease
+                            }}
+                            className="w-full overflow-hidden"
                         >
-                            <DynamicInput input={input} onInputChange={onInputChange} disabled={disabled} />
+                            <div className="pt-1">
+                                <DynamicInput input={input} onInputChange={onInputChange} disabled={disabled} />
+                            </div>
                         </motion.div>
                     ))}
                 </AnimatePresence>

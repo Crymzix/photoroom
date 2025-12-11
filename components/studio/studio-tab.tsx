@@ -45,6 +45,8 @@ import {
     StudioLoadingPlaceholder
 } from './studio-placeholders';
 import { GeneratedImage } from '../../lib/types';
+import { BriaImageResponse } from '../../convex/promptImage';
+import { ScrollArea } from '../ui/scroll-area';
 
 interface StudioTabProps {
     studioId?: string;
@@ -198,51 +200,68 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
 
         try {
             setIsGenerating(true);
-
             setStudioState('uploading')
-            // Step 1: Get a short-lived upload URL
-            const postUrl = await generateUploadUrl(undefined);
-            // Step 2: POST the file to the URL
-            const result = await fetch(postUrl, {
-                method: "POST",
-                headers: { "Content-Type": imageFile!.type },
-                body: imageFile,
-            });
-            const { storageId } = await result.json();
-            // Step 3: Save the newly allocated storage id to the database
-            const imageId = await uploadImage({ storageId });
 
-            // Step 4: Call Bria AI API
-            setStudioState('generating')
-            const response = await promptImage({
-                storageId,
-                prompt: textPrompt,
-                negativePrompt,
-                guidance,
-                seed,
-                steps,
-                structuredPrompt,
-                aspectRatio
-            });
+            let response: BriaImageResponse | undefined = undefined;
+            if (!uploadedImage && !generatedPreview) {
+                const postUrl = await generateUploadUrl(undefined);
+                const result = await fetch(postUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": imageFile!.type },
+                    body: imageFile,
+                });
+                const { storageId } = await result.json();
+                const imageId = await uploadImage({ storageId });
+
+                setStudioState('generating')
+                response = await promptImage({
+                    storageId,
+                    prompt: textPrompt,
+                    negativePrompt,
+                    guidance,
+                    seed,
+                    steps,
+                    structuredPrompt,
+                    aspectRatio
+                });
+
+                let studioId = currentStudioId;
+                if (!studioId) {
+                    studioId = await handleSaveStudio(imageId, response.result.image_url)
+                }
+
+                if (studioId) {
+                    await handleSaveGeneratedImage({
+                        studioId,
+                        generatedPreview: response.result.image_url,
+                        structuredPrompt: response.result.structured_prompt,
+                    })
+                }
+            } else {
+                setStudioState('generating')
+                response = await promptImage({
+                    prompt: textPrompt,
+                    imageUrl: generatedPreview!,
+                    negativePrompt,
+                    guidance,
+                    seed,
+                    steps,
+                    structuredPrompt,
+                    aspectRatio
+                });
+
+                if (currentStudioId) {
+                    await handleSaveGeneratedImage({
+                        studioId: currentStudioId,
+                        generatedPreview: response.result.image_url,
+                        structuredPrompt: response.result.structured_prompt,
+                    })
+                }
+            }
 
             setGeneratedPreview(response.result.image_url);
             setStructuredPrompt(response.result.structured_prompt);
 
-            // Step 5: Save generated image
-            let studioId = currentStudioId;
-            if (!studioId) {
-                studioId = await handleSaveStudio(imageId, response.result.image_url)
-            }
-
-            if (studioId) {
-                await handleSaveGeneratedImage({
-                    studioId,
-                    generatedPreview: response.result.image_url,
-                    structuredPrompt: response.result.structured_prompt,
-                })
-            }
-
-            // Step 6: Generate UI
             submit({
                 structuredPrompt: response.result.structured_prompt,
                 seed,
@@ -439,6 +458,43 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
         }
     }
 
+    const handleDownload = async () => {
+        if (!generatedPreview) {
+            return;
+        }
+        try {
+            // 1. Fetch the image data
+            const response = await fetch(generatedPreview, {
+                method: 'GET',
+                headers: {}, // Add auth headers here if needed
+            });
+
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+
+            // 2. Convert to Blob (Binary Large Object)
+            const blob = await response.blob();
+
+            // 3. Create a temporary URL for the Blob
+            const blobUrl = window.URL.createObjectURL(blob);
+
+            // 4. Create a hidden link and trigger the click
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = "generated-image.png"; // Rename file here if desired
+            document.body.appendChild(link);
+            link.click();
+
+            // 5. Cleanup
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(blobUrl);
+
+        } catch (error) {
+            console.error('Download failed:', error);
+        }
+    };
+
     return (
         <>
             {/* Handle authorization states when studioId is provided */}
@@ -472,25 +528,29 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                             ) : displaySections && displaySections.length > 0 ? (
                                 // Show sections with animations
                                 <AnimatePresence mode="popLayout">
-                                    {displaySections.map((section: any, index: number) => (
-                                        <motion.div
-                                            key={section.title || index}
-                                            initial={{ opacity: 0, y: 20, scale: 0.95 }}
-                                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                                            exit={{ opacity: 0, y: -20, scale: 0.95 }}
-                                            transition={{
-                                                duration: 0.3,
-                                                ease: "easeOut"
-                                            }}
-                                            layout
-                                        >
-                                            <DynamicSection
-                                                disabled={false}
-                                                section={section}
-                                                onInputChange={handleDynamicInputChange}
-                                            />
-                                        </motion.div>
-                                    ))}
+                                    <ScrollArea className="h-full max-h-[calc(100vh-65.16px-1.68rem)] rounded-lg overflow-hidden">
+                                        <div className='space-y-3'>
+                                            {displaySections.map((section: any, index: number) => (
+                                                <motion.div
+                                                    key={section.title || index}
+                                                    initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                    exit={{ opacity: 0, y: -20, scale: 0.95 }}
+                                                    transition={{
+                                                        duration: 0.3,
+                                                        ease: "easeOut"
+                                                    }}
+                                                    layout
+                                                >
+                                                    <DynamicSection
+                                                        disabled={false}
+                                                        section={section}
+                                                        onInputChange={handleDynamicInputChange}
+                                                    />
+                                                </motion.div>
+                                            ))}
+                                        </div>
+                                    </ScrollArea>
                                 </AnimatePresence>
                             ) : (
                                 <StudioUiEmptyState />
@@ -575,7 +635,7 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                                                 disabled={(!uploadedImage && !generatedPreview) || isGenerating || isStreamingUi || !textPrompt?.trim()}
                                                 className="bg-gradient-to-r from-[#FB4E43] via-[#FB4E43] to-[#39DEE3] text-white"
                                             >
-                                                {isGenerating || isStreamingUi ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Sparks className="w-4 h-4 mr-2" />}
+                                                {isGenerating || isStreamingUi || isRefining ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Sparks className="w-4 h-4 mr-2" />}
                                                 {
                                                     studioState === 'idle' ? 'Generate' :
                                                         studioState === 'uploading' ? 'Uploading...' :
@@ -815,15 +875,9 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                                         </p>
                                     </div>
                                     <div className="p-3 space-y-3">
-                                        <div className="grid grid-cols-4 gap-2">
-                                            {['PNG', 'JPEG', 'WebP', 'TIFF'].map(f => (
-                                                <Button key={f} variant="outline" size="sm" className="text-xs h-8">
-                                                    {f}
-                                                </Button>
-                                            ))}
-                                        </div>
                                         <Button
                                             disabled={!generatedPreview}
+                                            onClick={handleDownload}
                                             className="w-full bg-gradient-to-r from-[#FB4E43] via-[#FB4E43] to-[#39DEE3] text-white"
                                         >
                                             Export Image
