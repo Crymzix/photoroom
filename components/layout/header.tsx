@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { Camera, MediaImageList } from 'iconoir-react';
 import { Button } from "@/components/ui/button";
 import { SignInDialog } from '@/components/sign-in-dialog';
@@ -9,7 +9,7 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/utils';
 
-export function Header() {
+function InternalHeader() {
     const [signInOpen, setSignInOpen] = useState(false);
     const token = useAuthToken();
     const { signOut } = useAuthActions();
@@ -103,4 +103,12 @@ export function Header() {
             </div>
         </header>
     );
+}
+
+export function Header() {
+    return (
+        <Suspense>
+            <InternalHeader />
+        </Suspense>
+    )
 }

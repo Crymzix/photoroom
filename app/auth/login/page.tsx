@@ -3,13 +3,16 @@
 import { useAuthActions } from "@convex-dev/auth/react";
 import { Github, Google } from "iconoir-react";
 import { Loader2 } from "lucide-react";
-import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { use, useEffect, useState } from "react";
 
-export default function LoginPage() {
+export default function LoginPage({
+    searchParams,
+}: {
+    searchParams: Promise<{ provider?: string }>
+}) {
     const { signIn } = useAuthActions();
-    const searchParams = useSearchParams();
-    const provider = searchParams.get("provider");
+    const params = use(searchParams)
+    const provider = params.provider;
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
