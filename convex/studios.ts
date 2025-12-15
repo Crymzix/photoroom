@@ -11,14 +11,12 @@ export const saveStudio = mutation({
         isPublic: v.optional(v.boolean()),
     },
     handler: async (ctx, args) => {
-        const userId = await getAuthUserId(ctx);
 
         const { ...data } = args;
         const timestamp = Date.now();
 
         const studioId = await ctx.db.insert("studios", {
             ...data,
-            userId,
             updatedAt: timestamp,
         });
         return studioId;

@@ -9,7 +9,7 @@ export default defineSchema({
         format: v.string(),
     }),
     studios: defineTable({
-        userId: v.union(v.id("users"), v.null()),
+        userId: v.optional(v.union(v.id("users"), v.null())),
         imageId: v.id("images"),
         name: v.optional(v.string()),
         settings: v.optional(v.any()),

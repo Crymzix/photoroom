@@ -2,7 +2,6 @@ import { useEffect, useState, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Shuffle,
-    RotateCameraRight,
     FloppyDisk,
     ShieldAlert,
     InfoCircle,
@@ -21,7 +20,6 @@ import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-
 import { Section } from './section';
 import { API_CONSTRAINTS } from './data';
 import { Loader2 } from 'lucide-react';
@@ -60,6 +58,10 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
         api.studios.getStudioById,
         studioId ? { studioId: studioId as Id<"studios"> } : "skip"
     ))
+    const { data: originalImageUrl } = useQuery(convexQuery(
+        api.images.getImageUrl,
+        studioData?.studio?.imageId ? { imageId: studioData.studio.imageId } : "skip"
+    ));
     // Image upload
     const { mutateAsync: generateUploadUrl } = useMutation({
         mutationFn: useConvexMutation(api.images.generateUploadUrl),
@@ -233,7 +235,7 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
             setStudioState('uploading')
 
             let response: BriaImageResponse | undefined = undefined;
-            if (!uploadedImage && !generatedPreview) {
+            if (!generatedPreview) {
                 const postUrl = await generateUploadUrl(undefined);
                 const result = await fetch(postUrl, {
                     method: "POST",
@@ -330,15 +332,25 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
         setUi(uiSchema)
     }
 
-    const handleDiffCalculation = useDebouncedCallback((path: string, value: string) => {
+    const pendingChangesRef = useRef<Record<string, any>>({});
+
+    useEffect(() => {
+        pendingChangesRef.current = {};
+        setDiff(undefined);
+    }, [structuredPrompt]);
+
+    const handleDiffCalculation = useDebouncedCallback(() => {
         if (!structuredPrompt) {
             return
         }
         const structuredPromptObj = JSON.parse(structuredPrompt)
         const newStructuredPromptObj = JSON.parse(structuredPrompt)
 
-        set(newStructuredPromptObj, path, value)
-        const diff = getDiff(structuredPromptObj, newStructuredPromptObj)
+        Object.entries(pendingChangesRef.current).forEach(([path, value]) => {
+            set(newStructuredPromptObj, path, value)
+        })
+
+        const diff = getDiff(structuredPromptObj, newStructuredPromptObj, { isLodashLike: true })
         if (diff.edited.length > 0) {
             setDiff(JSON.stringify(diff))
         } else {
@@ -347,7 +359,8 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
     }, 300);
 
     const handleDynamicInputChange = (path: string, value: string) => {
-        handleDiffCalculation(path, value);
+        pendingChangesRef.current[path] = value;
+        handleDiffCalculation();
     };
 
     const displaySections = useMemo(() => {
@@ -615,7 +628,7 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                                         <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded-full">Required</span>
                                     </div>
                                     <div className="flex gap-1">
-                                        {uploadedImage && (
+                                        {uploadedImage && !generatedPreview && (
                                             <Button
                                                 variant="ghost"
                                                 size="icon"
@@ -912,6 +925,27 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                         {/* Right Panel */}
                         <div className="col-span-3 space-y-3">
                             <div className="space-y-3">
+                                {/* Original Reference */}
+                                {originalImageUrl && (
+                                    <div className="bg-card rounded-lg overflow-hidden border">
+                                        <div className="p-3 border-b">
+                                            <p className="font-semibold text-gray-900 text-sm flex items-center gap-2">
+                                                <MediaImage className="w-4 h-4 text-primary" />
+                                                Original Reference
+                                            </p>
+                                        </div>
+                                        <div className="p-3">
+                                            <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden border">
+                                                <img
+                                                    src={originalImageUrl}
+                                                    alt="Original Reference"
+                                                    className="w-full h-full object-contain"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
                                 {/* Export */}
                                 <div className="bg-card rounded-lg overflow-hidden border">
                                     <div className="p-3 border-b">
