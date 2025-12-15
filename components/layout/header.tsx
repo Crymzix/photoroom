@@ -29,7 +29,6 @@ function InternalHeader() {
                     </div>
                     <div>
                         <h1 className="text-lg font-bold text-gray-900">Photo Studio</h1>
-                        <p className="text-xs text-gray-500">Powered by FIBO / Bria AI</p>
                     </div>
                 </div>
 

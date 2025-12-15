@@ -5,6 +5,7 @@ import "./globals.css";
 import { ConvexClientProvider } from "../providers/convex-client-provider";
 import { Header } from "@/components/layout/header";
 import { usePathname } from "next/navigation";
+import { Toaster } from "sonner";
 
 const poppins = Poppins({
     variable: "--font-poppins",
@@ -48,6 +49,7 @@ export default function RootLayout({
                             <main className="flex-1">
                                 {children}
                             </main>
+                            <Toaster />
                         </div>
                     </div>
                 </ConvexClientProvider>

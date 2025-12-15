@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { MagicWand, Download, Lock, Trash, WarningTriangle } from 'iconoir-react';
+import { MagicWand, Download, Lock, Trash, WarningTriangle, Globe, ShareIos } from 'iconoir-react';
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 import { useQuery, useConvexAuth } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,6 +33,26 @@ export function SavedStudios() {
     const { mutateAsync: deleteStudio, isPending: isDeleting } = useMutation({
         mutationFn: useConvexMutation(api.studios.deleteStudio),
     });
+
+    const { mutateAsync: updateStudio } = useMutation({
+        mutationFn: useConvexMutation(api.studios.updateStudio),
+    });
+
+    const handlePrivacyChange = async (studioId: Id<"studios">, isPublic: boolean) => {
+        try {
+            await updateStudio({ id: studioId, isPublic });
+            toast.success(isPublic ? "Studio is now public" : "Studio is now private");
+        } catch (error) {
+            console.error("Failed to update studio privacy:", error);
+            toast.error("Failed to update privacy settings");
+        }
+    };
+
+    const handleShareClick = (studioId: Id<"studios">) => {
+        const url = `${window.location.origin}/${studioId}`;
+        navigator.clipboard.writeText(url);
+        toast.success("Link copied to clipboard");
+    };
 
     const handleDeleteClick = (studioId: Id<"studios">, studioName: string) => {
         setStudioToDelete({ id: studioId, name: studioName });
@@ -153,27 +176,54 @@ export function SavedStudios() {
                                             </p>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                        <Button
-                                            onClick={() => router.push(`/${studio._id}`)}
-                                            variant="secondary"
-                                            size="sm"
-                                            className="bg-primary/10 text-primary hover:bg-primary/20 h-8"
-                                        >
-                                            <MagicWand className="w-3.5 h-3.5 mr-1" />
-                                            Refine
-                                        </Button>
-                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-gray-600">
-                                            <Download className="w-4 h-4" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8 text-gray-400 hover:text-red-500"
-                                            onClick={() => handleDeleteClick(studio._id, studio.name || "")}
-                                        >
-                                            <Trash className="w-4 h-4" />
-                                        </Button>
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-2 mr-2">
+                                            <Switch
+                                                id={`privacy-${studio._id}`}
+                                                checked={studio.isPublic || false}
+                                                onCheckedChange={(checked) => handlePrivacyChange(studio._id, checked)}
+                                            />
+                                            <Label htmlFor={`privacy-${studio._id}`} className="cursor-pointer text-xs text-gray-500 font-normal flex items-center gap-1">
+                                                {studio.isPublic ? (
+                                                    <><Globe className="w-3.5 h-3.5" /> Public</>
+                                                ) : (
+                                                    <><Lock className="w-3.5 h-3.5" /> Private</>
+                                                )}
+                                            </Label>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <Button
+                                                onClick={() => router.push(`/${studio._id}`)}
+                                                variant="secondary"
+                                                size="sm"
+                                                className="bg-primary/10 text-primary hover:bg-primary/20 h-8"
+                                            >
+                                                <MagicWand className="w-3.5 h-3.5 mr-1" />
+                                                Refine
+                                            </Button>
+                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-gray-600">
+                                                <Download className="w-4 h-4" />
+                                            </Button>
+                                            {studio.isPublic && (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8 text-gray-400 hover:text-blue-500"
+                                                    onClick={() => handleShareClick(studio._id)}
+                                                    title="Share public link"
+                                                >
+                                                    <ShareIos className="w-4 h-4" />
+                                                </Button>
+                                            )}
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 text-gray-400 hover:text-red-500"
+                                                onClick={() => handleDeleteClick(studio._id, studio.name || "")}
+                                            >
+                                                <Trash className="w-4 h-4" />
+                                            </Button>
+                                        </div>
                                     </div>
                                 </div>
                             );
@@ -209,6 +259,6 @@ export function SavedStudios() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
-        </motion.div>
+        </motion.div >
     );
 }

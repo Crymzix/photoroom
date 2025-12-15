@@ -10,7 +10,8 @@ import {
     Trash,
     MediaImage,
     Sparks,
-    Settings
+    Settings,
+    ShareIos
 } from 'iconoir-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,9 +20,9 @@ import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 import { Section } from './section';
-import { Template } from './types';
 import { API_CONSTRAINTS } from './data';
 import { Loader2 } from 'lucide-react';
 import { useAction, useConvexAuth } from 'convex/react';
@@ -37,6 +38,7 @@ import { getDiff } from 'json-difference'
 import { useCompletion } from '@ai-sdk/react';
 import { generatePrompt } from '../../app/api/generate-prompt/generate-prompt';
 import { useDebouncedCallback, useDebounce } from 'use-debounce';
+import { extractColors } from 'extract-colors';
 import { SignInDialog } from '../sign-in-dialog';
 import {
     StudioNotFoundPlaceholder,
@@ -93,6 +95,7 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
     const [generatedPreview, setGeneratedPreview] = useState<string | null>(null);
     const [warnings, setWarnings] = useState<string[]>([]);
     const [signInOpen, setSignInOpen] = useState(false);
+    const [backgroundGradient, setBackgroundGradient] = useState<string>('radial-gradient(circle 400px at 50% 200px, #bfdbfe, #fef3c7)');
 
     // Convex State
     const [currentStudioId, setCurrentStudioId] = useState<Id<"studios"> | undefined>();
@@ -144,6 +147,31 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
         }
     }, [completion]);
 
+    useEffect(() => {
+        const imageUrl = generatedPreview || uploadedImage;
+        if (!imageUrl) {
+            setBackgroundGradient('radial-gradient(circle 400px at 50% 200px, #bfdbfe, #fef3c7)');
+            return;
+        }
+
+        const updateBackground = async () => {
+            try {
+                const colors = await extractColors(imageUrl, { crossOrigin: 'anonymous' });
+                if (colors && colors.length > 0) {
+                    const sorted = colors.sort((a, b) => b.area - a.area);
+                    const c1 = sorted[0].hex;
+                    const c2 = sorted.length > 1 ? sorted[1].hex : '#ffffff';
+                    // Use low opacity for a subtle effect
+                    setBackgroundGradient(`radial-gradient(circle 400px at 50% 200px, ${c1}40, ${c2}40)`);
+                }
+            } catch (e) {
+                console.error("Failed to extract colors:", e);
+            }
+        };
+
+        updateBackground();
+    }, [generatedPreview, uploadedImage]);
+
     const [debouncedDiff] = useDebounce(diff, 500);
 
     useEffect(() => {
@@ -193,8 +221,10 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
         }
     };
 
+    const isBusy = isGenerating || isStreamingUi || isRefining;
+
     const generate = async () => {
-        if (!uploadedImage && !generatedPreview) {
+        if ((!uploadedImage && !generatedPreview) || isBusy) {
             return;
         }
 
@@ -456,6 +486,11 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
         if (img.ui) {
             setUi(JSON.parse(img.ui));
         }
+
+        setSeed(img.settings.seed);
+        setGuidance(img.settings.guidance);
+        setSteps(img.settings.steps);
+        setAspectRatio(img.settings.aspectRatio);
     }
 
     const handleDownload = async () => {
@@ -493,6 +528,13 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
         } catch (error) {
             console.error('Download failed:', error);
         }
+    };
+
+    const handleShareClick = () => {
+        if (!currentStudioId) return;
+        const url = `${window.location.origin}/${currentStudioId}`;
+        navigator.clipboard.writeText(url);
+        toast.success("Link copied to clipboard");
     };
 
     return (
@@ -546,6 +588,7 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                                                         disabled={false}
                                                         section={section}
                                                         onInputChange={handleDynamicInputChange}
+                                                        isUpdating={isStreamingUi}
                                                     />
                                                 </motion.div>
                                             ))}
@@ -561,7 +604,10 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                         <div className="col-span-6 space-y-4">
                             <div className="bg-card rounded-lg overflow-hidden border relative">
                                 {/* Background Effect */}
-                                <div className="absolute bottom-0 left-0 right-0 top-0 bg-[radial-gradient(circle_400px_at_50%_200px,#bfdbfe,#fef3c7)] pointer-events-none"></div>
+                                <div
+                                    className="absolute bottom-0 left-0 right-0 top-0 pointer-events-none transition-all duration-1000"
+                                    style={{ background: backgroundGradient }}
+                                ></div>
                                 {/* Preview Header */}
                                 <div className="p-3 border-b flex items-center justify-between bg-card z-20 relative">
                                     <div className="flex items-center gap-2">
@@ -632,10 +678,10 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                                         <div className="flex gap-2">
                                             <Button
                                                 onClick={generate}
-                                                disabled={(!uploadedImage && !generatedPreview) || isGenerating || isStreamingUi || !textPrompt?.trim()}
+                                                disabled={(!uploadedImage && !generatedPreview) || isBusy || !textPrompt?.trim()}
                                                 className="bg-gradient-to-r from-[#FB4E43] via-[#FB4E43] to-[#39DEE3] text-white"
                                             >
-                                                {isGenerating || isStreamingUi || isRefining ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Sparks className="w-4 h-4 mr-2" />}
+                                                {isBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Sparks className="w-4 h-4 mr-2" />}
                                                 {
                                                     studioState === 'idle' ? 'Generate' :
                                                         studioState === 'uploading' ? 'Uploading...' :
@@ -722,7 +768,7 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                                             typingLoop={true}
                                             rows={2}
                                             className="w-full mt-1 px-3 py-2 text-sm resize-none bg-primary-foreground"
-                                            disabled={isGenerating || isStreamingUi || isRefining}
+                                            disabled={isBusy}
                                             onKeyDown={(e => {
                                                 if (e.key === 'Enter') {
                                                     e.preventDefault();
@@ -763,7 +809,7 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                                             typingLoop={true}
                                             rows={2}
                                             className="w-full mt-1 px-3 py-2 text-sm resize-none bg-primary-foreground"
-                                            disabled={isGenerating || isStreamingUi}
+                                            disabled={isBusy}
                                         />
                                     </div>
                                     {/* Advanced Settings */}
@@ -882,6 +928,16 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                                         >
                                             Export Image
                                         </Button>
+                                        {studioData?.studio?.isPublic && (
+                                            <Button
+                                                onClick={handleShareClick}
+                                                variant="outline"
+                                                className="w-full gap-2"
+                                            >
+                                                <ShareIos className="w-4 h-4" />
+                                                Share Link
+                                            </Button>
+                                        )}
                                     </div>
                                 </div>
 
@@ -909,7 +965,7 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
                                 )}
                             </div>
                             {
-                                currentStudioId &&
+                                currentStudioId && !studioData &&
                                 <div className="flex justify-end mt-2">
                                     <Button onClick={() => handleSave()} variant="outline" className="gap-2">
                                         {

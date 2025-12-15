@@ -32,6 +32,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "convex": "^1.30.0",
+    "extract-colors": "^4.2.1",
     "framer-motion": "^12.23.24",
     "iconoir-react": "^7.11.0",
     "json-difference": "^1.16.1",

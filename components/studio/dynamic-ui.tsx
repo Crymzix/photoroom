@@ -269,33 +269,44 @@ const DynamicInput = ({ input, onInputChange, disabled }: DynamicInputProps) => 
     );
 };
 
-export const DynamicSection = ({ section, onInputChange, disabled }: { section: any, onInputChange: (path: string, value: string) => void, disabled?: boolean }) => {
+export const DynamicSection = ({ section, onInputChange, disabled, isUpdating }: { section: any, onInputChange: (path: string, value: string) => void, disabled?: boolean, isUpdating?: boolean }) => {
     const Icon = getSectionIcon(section.title);
 
     return (
-        <Section title={section.title} icon={Icon}>
-            <div className="flex flex-col gap-2">
-                <AnimatePresence initial={false}>
-                    {section.inputs?.map((input: any, idx: number) => (
-                        <motion.div
-                            key={input.id || `${input.label}-${idx}`}
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: "auto" }}
-                            exit={{ opacity: 0, height: 0 }}
-                            transition={{
-                                duration: 0.3,
-                                ease: [0.4, 0, 0.2, 1], // Smooth "iOS-like" ease
-                            }}
-                            className="w-full overflow-hidden"
-                        >
-                            <div className="pt-1">
-                                <DynamicInput input={input} onInputChange={onInputChange} disabled={disabled} />
-                            </div>
-                        </motion.div>
-                    ))}
-                </AnimatePresence>
-            </div>
-        </Section>
+        <div className="relative rounded-lg transition-all duration-300">
+            <Section title={section.title} icon={Icon}>
+                <div className="flex flex-col gap-2">
+                    <AnimatePresence initial={false}>
+                        {section.inputs?.map((input: any, idx: number) => (
+                            <motion.div
+                                key={input.id || `${input.label}-${idx}`}
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: "auto" }}
+                                exit={{ opacity: 0, height: 0 }}
+                                transition={{
+                                    duration: 0.3,
+                                    ease: [0.4, 0, 0.2, 1], // Smooth "iOS-like" ease
+                                }}
+                                className="w-full overflow-hidden"
+                            >
+                                <div className="p-1">
+                                    <DynamicInput input={input} onInputChange={onInputChange} disabled={disabled} />
+                                </div>
+                            </motion.div>
+                        ))}
+                    </AnimatePresence>
+                </div>
+            </Section>
+            {isUpdating && (
+                <motion.div
+                    className="absolute inset-0 bg-primary/5 border-2 border-primary rounded-lg pointer-events-none z-10"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: [0.2, 0.6, 0.2] }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                />
+            )}
+        </div>
     );
 };
 

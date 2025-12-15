@@ -8,6 +8,7 @@ export const saveStudio = mutation({
         name: v.optional(v.string()),
         settings: v.optional(v.any()),
         previewImageUrl: v.optional(v.string()),
+        isPublic: v.optional(v.boolean()),
     },
     handler: async (ctx, args) => {
         const userId = await getAuthUserId(ctx);
@@ -29,6 +30,7 @@ export const updateStudio = mutation({
         id: v.id("studios"),
         name: v.optional(v.string()),
         settings: v.optional(v.any()),
+        isPublic: v.optional(v.boolean()),
     },
     handler: async (ctx, args) => {
         const userId = await getAuthUserId(ctx);
