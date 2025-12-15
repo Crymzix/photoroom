@@ -38,6 +38,8 @@ import { generatePrompt } from '../../app/api/generate-prompt/generate-prompt';
 import { useDebouncedCallback, useDebounce } from 'use-debounce';
 import { extractColors } from 'extract-colors';
 import { SignInDialog } from '../sign-in-dialog';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 import {
     StudioNotFoundPlaceholder,
     StudioPrivatePlaceholder,
@@ -127,6 +129,9 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
     const [steps, setSteps] = useState(30);
     const [guidance, setGuidance] = useState(4);
     const [aspectRatio, setAspectRatio] = useState('1:1');
+
+
+    const [isDownloadingAll, setIsDownloadingAll] = useState(false);
 
     const [isDragging, setIsDragging] = useState(false);
 
@@ -545,6 +550,35 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
 
         } catch (error) {
             console.error('Download failed:', error);
+        }
+    };
+
+    const handleDownloadAll = async () => {
+        if (!studioHistory || studioHistory.length === 0) return;
+
+        setIsDownloadingAll(true);
+        try {
+            const zip = new JSZip();
+            const promises = studioHistory.map(async (img, index) => {
+                try {
+                    const response = await fetch(img.imageUrl, { mode: 'cors' });
+                    if (!response.ok) throw new Error(`Failed to fetch ${img.imageUrl}`);
+                    const blob = await response.blob();
+                    zip.file(`image-${index + 1}.png`, blob);
+                } catch (e) {
+                    console.error("Failed to download image", e);
+                }
+            });
+
+            await Promise.all(promises);
+            const content = await zip.generateAsync({ type: "blob" });
+            saveAs(content, "studio-images.zip");
+            toast.success("All images downloaded");
+        } catch (error) {
+            console.error("Download all failed:", error);
+            toast.error("Failed to download images");
+        } finally {
+            setIsDownloadingAll(false);
         }
     };
 
@@ -982,10 +1016,24 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
 
                                 {currentStudioId && studioHistory && studioHistory?.length > 0 && (
                                     <div className="bg-card rounded-lg overflow-hidden border mt-3">
-                                        <div className="p-3 border-b">
+                                        <div className="p-3 border-b flex items-center justify-between">
                                             <p className="font-semibold text-gray-900 text-sm flex items-center gap-2">
                                                 History
                                             </p>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={handleDownloadAll}
+                                                disabled={isDownloadingAll}
+                                                className="h-6 w-6"
+                                                title="Download all as ZIP"
+                                            >
+                                                {isDownloadingAll ? (
+                                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                ) : (
+                                                    <Download className="w-3.5 h-3.5" />
+                                                )}
+                                            </Button>
                                         </div>
                                         <div className="p-3 grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
                                             {studioHistory.map((img) => (

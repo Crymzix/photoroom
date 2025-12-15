@@ -11,7 +11,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useMutation } from "@tanstack/react-query";
 import { useConvexMutation } from "@convex-dev/react-query";
 import { Id } from "@/convex/_generated/dataModel";
-import { useRouter } from 'next/navigation';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
+import { Loader2 } from 'lucide-react';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -22,12 +24,14 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useRouter } from 'next/navigation';
 
 export function SavedStudios() {
     const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
     const studios = useQuery(api.studios.getUserStudios);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [studioToDelete, setStudioToDelete] = useState<{ id: Id<"studios">, name: string } | null>(null);
+    const [isDownloadingAll, setIsDownloadingAll] = useState(false);
     const router = useRouter();
 
     const { mutateAsync: deleteStudio, isPending: isDeleting } = useMutation({
@@ -69,6 +73,50 @@ export function SavedStudios() {
         } catch (error) {
             console.error("Failed to delete studio:", error);
             alert("Failed to delete studio. Please try again.");
+        }
+    };
+
+    const handleDownloadStudio = async (imageUrl: string | undefined, name: string) => {
+        if (!imageUrl) return;
+        try {
+            const response = await fetch(imageUrl, { mode: 'cors' });
+            if (!response.ok) throw new Error("Network response was not ok");
+            const blob = await response.blob();
+            saveAs(blob, `${name || 'studio'}.png`);
+        } catch (error) {
+            console.error("Download failed:", error);
+            toast.error("Failed to download image");
+        }
+    };
+
+    const handleDownloadAll = async () => {
+        if (!studios || studios.length === 0) return;
+
+        setIsDownloadingAll(true);
+        try {
+            const zip = new JSZip();
+            const promises = studios.map(async (studio, index) => {
+                if (!studio.previewImageUrl) return;
+                try {
+                    const response = await fetch(studio.previewImageUrl, { mode: 'cors' });
+                    if (!response.ok) throw new Error(`Failed to fetch ${studio.previewImageUrl}`);
+                    const blob = await response.blob();
+                    const fileName = studio.name ? `${studio.name}.png` : `studio-${index + 1}.png`;
+                    zip.file(fileName, blob);
+                } catch (e) {
+                    console.error("Failed to download image", e);
+                }
+            });
+
+            await Promise.all(promises);
+            const content = await zip.generateAsync({ type: "blob" });
+            saveAs(content, "saved-studios.zip");
+            toast.success("All studio images downloaded");
+        } catch (error) {
+            console.error("Download all failed:", error);
+            toast.error("Failed to download images");
+        } finally {
+            setIsDownloadingAll(false);
         }
     };
 
@@ -143,9 +191,27 @@ export function SavedStudios() {
             transition={{ duration: 0.3 }}
         >
             <div className="space-y-4">
-                <div>
-                    <h2 className="text-xl font-bold text-gray-900">Saved Studios</h2>
-                    <p className="text-gray-500 text-sm">Review and refine from past generations</p>
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h2 className="text-xl font-bold text-gray-900">Saved Studios</h2>
+                        <p className="text-gray-500 text-sm">Review and refine from past generations</p>
+                    </div>
+                    {studios && studios.length > 0 && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleDownloadAll}
+                            disabled={isDownloadingAll}
+                            className="gap-2"
+                        >
+                            {isDownloadingAll ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                                <Download className="w-4 h-4" />
+                            )}
+                            Download All
+                        </Button>
+                    )}
                 </div>
 
                 <div className="bg-white rounded-lg overflow-hidden border border-gray-100">
@@ -201,7 +267,14 @@ export function SavedStudios() {
                                                 <MagicWand className="w-3.5 h-3.5 mr-1" />
                                                 Refine
                                             </Button>
-                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-gray-600">
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 text-gray-400 hover:text-gray-600"
+                                                onClick={() => handleDownloadStudio(studio.previewImageUrl, studio.name || "studio")}
+                                                disabled={!studio.previewImageUrl}
+                                                title="Download image"
+                                            >
                                                 <Download className="w-4 h-4" />
                                             </Button>
                                             {studio.isPublic && (
