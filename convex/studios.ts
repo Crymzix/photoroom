@@ -138,12 +138,40 @@ export const deleteStudio = mutation({
             throw new Error("Studio not found");
         }
 
-        // Check if the user owns this studio
         if (studio.userId !== userId) {
             throw new Error("Not authorized to delete this studio");
         }
 
         await ctx.db.delete(args.id);
+    },
+});
+
+export const getAllUserStudioData = query({
+    args: {},
+    handler: async (ctx) => {
+        const userId = await getAuthUserId(ctx);
+        if (!userId) {
+            return [];
+        }
+
+        const studios = await ctx.db
+            .query("studios")
+            .withIndex("by_user", (q) => q.eq("userId", userId))
+            .collect();
+
+        const results = await Promise.all(studios.map(async (studio) => {
+            const images = await ctx.db
+                .query("generatedImages")
+                .withIndex("by_studio", (q) => q.eq("studioId", studio._id))
+                .collect();
+
+            return {
+                studio,
+                images
+            };
+        }));
+
+        return results;
     },
 });
 

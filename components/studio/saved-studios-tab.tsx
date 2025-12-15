@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { useQuery, useConvexAuth } from "convex/react";
+import { useQuery, useConvexAuth, useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMutation } from "@tanstack/react-query";
@@ -28,6 +28,7 @@ import { useRouter } from 'next/navigation';
 
 export function SavedStudios() {
     const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
+    const convex = useConvex();
     const studios = useQuery(api.studios.getUserStudios);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [studioToDelete, setStudioToDelete] = useState<{ id: Id<"studios">, name: string } | null>(null);
@@ -90,31 +91,48 @@ export function SavedStudios() {
     };
 
     const handleDownloadAll = async () => {
-        if (!studios || studios.length === 0) return;
-
         setIsDownloadingAll(true);
         try {
+            // Fetch all data for all studios
+            const allStudioData = await convex.query(api.studios.getAllUserStudioData, {});
+
+            if (!allStudioData || allStudioData.length === 0) {
+                toast.error("No studios to download");
+                return;
+            }
+
             const zip = new JSZip();
-            const promises = studios.map(async (studio, index) => {
-                if (!studio.previewImageUrl) return;
-                try {
-                    const response = await fetch(studio.previewImageUrl, { mode: 'cors' });
-                    if (!response.ok) throw new Error(`Failed to fetch ${studio.previewImageUrl}`);
-                    const blob = await response.blob();
-                    const fileName = studio.name ? `${studio.name}.png` : `studio-${index + 1}.png`;
-                    zip.file(fileName, blob);
-                } catch (e) {
-                    console.error("Failed to download image", e);
+
+            // Iterate over each studio
+            const studioPromises = allStudioData.map(async (item, index) => {
+                const { studio, images } = item;
+                const folderName = studio.name ? `${studio.name.replace(/[^a-z0-9]/gi, '_')}-${index}` : `studio-${index}`;
+                const folder = zip.folder(folderName);
+
+                if (folder) {
+                    // Download all images for this studio
+                    const imagePromises = images.map(async (img, imgIndex) => {
+                        try {
+                            const response = await fetch(img.imageUrl, { mode: 'cors' });
+                            if (!response.ok) throw new Error(`Failed to fetch ${img.imageUrl}`);
+                            const blob = await response.blob();
+                            folder.file(`image-${imgIndex + 1}.png`, blob);
+                        } catch (e) {
+                            console.error(`Failed to download image for studio ${studio.name}`, e);
+                        }
+                    });
+                    await Promise.all(imagePromises);
                 }
             });
 
-            await Promise.all(promises);
+            await Promise.all(studioPromises);
+
             const content = await zip.generateAsync({ type: "blob" });
-            saveAs(content, "saved-studios.zip");
-            toast.success("All studio images downloaded");
+            saveAs(content, "saved-studios-history.zip");
+            toast.success("All studio histories downloaded");
         } catch (error) {
             console.error("Download all failed:", error);
-            toast.error("Failed to download images");
+            toast.error("Failed to download studio histories");
         } finally {
             setIsDownloadingAll(false);
         }
