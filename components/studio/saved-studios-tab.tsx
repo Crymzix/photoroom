@@ -32,7 +32,7 @@ export function SavedStudios() {
     const studios = useQuery(api.studios.getUserStudios);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [studioToDelete, setStudioToDelete] = useState<{ id: Id<"studios">, name: string } | null>(null);
-    const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+    const [downloadingStudioId, setDownloadingStudioId] = useState<Id<"studios"> | null>(null);
     const router = useRouter();
 
     const { mutateAsync: deleteStudio, isPending: isDeleting } = useMutation({
@@ -77,64 +77,39 @@ export function SavedStudios() {
         }
     };
 
-    const handleDownloadStudio = async (imageUrl: string | undefined, name: string) => {
-        if (!imageUrl) return;
+    const handleDownloadStudio = async (studioId: Id<"studios">, name: string) => {
+        setDownloadingStudioId(studioId);
         try {
-            const response = await fetch(imageUrl, { mode: 'cors' });
-            if (!response.ok) throw new Error("Network response was not ok");
-            const blob = await response.blob();
-            saveAs(blob, `${name || 'studio'}.png`);
-        } catch (error) {
-            console.error("Download failed:", error);
-            toast.error("Failed to download image");
-        }
-    };
+            // Fetch all images for this studio
+            const studioHistory = await convex.query(api.studios.getStudioHistory, { studioId });
 
-    const handleDownloadAll = async () => {
-        setIsDownloadingAll(true);
-        try {
-            // Fetch all data for all studios
-            const allStudioData = await convex.query(api.studios.getAllUserStudioData, {});
-
-            if (!allStudioData || allStudioData.length === 0) {
-                toast.error("No studios to download");
+            if (!studioHistory || studioHistory.length === 0) {
+                toast.error("No images found for this studio");
+                setDownloadingStudioId(null);
                 return;
             }
 
             const zip = new JSZip();
-
-            // Iterate over each studio
-            const studioPromises = allStudioData.map(async (item, index) => {
-                const { studio, images } = item;
-                const folderName = studio.name ? `${studio.name.replace(/[^a-z0-9]/gi, '_')}-${index}` : `studio-${index}`;
-                const folder = zip.folder(folderName);
-
-                if (folder) {
-                    // Download all images for this studio
-                    const imagePromises = images.map(async (img, imgIndex) => {
-                        try {
-                            const response = await fetch(img.imageUrl, { mode: 'cors' });
-                            if (!response.ok) throw new Error(`Failed to fetch ${img.imageUrl}`);
-                            const blob = await response.blob();
-                            folder.file(`image-${imgIndex + 1}.png`, blob);
-                        } catch (e) {
-                            console.error(`Failed to download image for studio ${studio.name}`, e);
-                        }
-                    });
-                    await Promise.all(imagePromises);
+            const promises = studioHistory.map(async (img, index) => {
+                try {
+                    const response = await fetch(img.imageUrl, { mode: 'cors' });
+                    if (!response.ok) throw new Error(`Failed to fetch ${img.imageUrl}`);
+                    const blob = await response.blob();
+                    zip.file(`image-${index + 1}.png`, blob);
+                } catch (e) {
+                    console.error("Failed to download image", e);
                 }
             });
 
-            await Promise.all(studioPromises);
-
+            await Promise.all(promises);
             const content = await zip.generateAsync({ type: "blob" });
-            saveAs(content, "saved-studios-history.zip");
-            toast.success("All studio histories downloaded");
+            saveAs(content, `${name || 'studio-history'}.zip`);
+            toast.success("Studio history downloaded");
         } catch (error) {
-            console.error("Download all failed:", error);
-            toast.error("Failed to download studio histories");
+            console.error("Download failed:", error);
+            toast.error("Failed to download studio history");
         } finally {
-            setIsDownloadingAll(false);
+            setDownloadingStudioId(null);
         }
     };
 
@@ -214,22 +189,6 @@ export function SavedStudios() {
                         <h2 className="text-xl font-bold text-gray-900">Saved Studios</h2>
                         <p className="text-gray-500 text-sm">Review and refine from past generations</p>
                     </div>
-                    {studios && studios.length > 0 && (
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleDownloadAll}
-                            disabled={isDownloadingAll}
-                            className="gap-2"
-                        >
-                            {isDownloadingAll ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                                <Download className="w-4 h-4" />
-                            )}
-                            Download All
-                        </Button>
-                    )}
                 </div>
 
                 <div className="bg-white rounded-lg overflow-hidden border border-gray-100">
@@ -289,11 +248,15 @@ export function SavedStudios() {
                                                 variant="ghost"
                                                 size="icon"
                                                 className="h-8 w-8 text-gray-400 hover:text-gray-600"
-                                                onClick={() => handleDownloadStudio(studio.previewImageUrl, studio.name || "studio")}
-                                                disabled={!studio.previewImageUrl}
-                                                title="Download image"
+                                                onClick={() => handleDownloadStudio(studio._id, studio.name || "studio")}
+                                                disabled={downloadingStudioId === studio._id}
+                                                title="Download studio history"
                                             >
-                                                <Download className="w-4 h-4" />
+                                                {downloadingStudioId === studio._id ? (
+                                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                                ) : (
+                                                    <Download className="w-4 h-4" />
+                                                )}
                                             </Button>
                                             {studio.isPublic && (
                                                 <Button
