@@ -406,6 +406,11 @@ export const StudioTab = ({ studioId }: StudioTabProps) => {
             return ui.sections;
         }
 
+        // Fallback to streamed UI if available (handles gap between stream finish and state update)
+        if (streamedUi?.sections && streamedUi.sections.length > 0) {
+            return streamedUi.sections;
+        }
+
         // No sections available
         return null;
     }, [isStreamingUi, ui, streamedUi]);
